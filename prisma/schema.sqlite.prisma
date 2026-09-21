@@ -1,0 +1,617 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String
+  name         String
+  role         String    @default("ADMIN") // ADMIN, PARTNER, STAFF
+  partnerId    String?   @unique
+  partner      Partner?  @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  permissions  String?   // JSON string of permissions
+  deviceInfo   String?
+  pinCode      String?   @default("1234")
+  language     String    @default("en")   // en, ta
+  theme        String    @default("light") // light, dark
+  isLocked     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model BusinessProfile {
+  id             String   @id @default("default-biz")
+  name           String   @default("VATTI BUSINESS")
+  ownerName      String   @default("Business Owner")
+  phone          String   @default("+91 98765 43210")
+  email          String?  @default("contact@vattibusiness.com")
+  address        String?  @default("123, Gandhi Road, Main Bazaar")
+  city           String?  @default("Chennai")
+  state          String?  @default("Tamil Nadu")
+  pincode        String?  @default("600001")
+  gstin          String?
+  pan            String?
+  bankName       String?  @default("State Bank of India")
+  accountNo      String?  @default("XXXX-XXXX-1234")
+  ifsc           String?  @default("SBIN0001234")
+  upiId          String?  @default("vatti@sbi")
+  logoUrl        String?
+  currencySymbol String   @default("₹")
+  dateFormat     String   @default("DD/MM/YYYY")
+  isSetupDone    Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+}
+
+model Partner {
+  id                 String                     @id @default(uuid())
+  partnerCode        String                     @unique
+  name               String
+  mobile             String
+  email              String?
+  address            String?
+  joiningDate        DateTime                   @default(now())
+  initialCapital     Float                      @default(0)
+  currentCapital     Float                      @default(0)
+  profitSharePercent Float                      @default(0)
+  lossSharePercent   Float                      @default(0)
+  status             String                     @default("ACTIVE") // ACTIVE, INACTIVE
+  notes              String?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  user               User?
+  investments        PartnerInvestment[]
+  withdrawals        PartnerWithdrawal[]
+  profitAllocations  PartnerProfitAllocation[]
+  settlements        PartnerSettlement[]
+}
+
+model PartnerInvestment {
+  id             String   @id @default(uuid())
+  investmentCode String   @unique
+  partnerId      String
+  partner        Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  date           DateTime @default(now())
+  amount         Float
+  type           String   @default("ADDITIONAL") // INITIAL, ADDITIONAL, EMERGENCY, EXPANSION, WORKING_CAPITAL, ASSET_PURCHASE, OTHER
+  paymentMethod  String   @default("CASH")       // CASH, BANK, UPI, CHEQUE
+  referenceNo    String?
+  bankAccountId  String?
+  purpose        String?
+  notes          String?
+  createdAt      DateTime @default(now())
+}
+
+model PartnerWithdrawal {
+  id             String   @id @default(uuid())
+  withdrawalCode String   @unique
+  partnerId      String
+  partner        Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  date           DateTime @default(now())
+  amount         Float
+  reason         String?
+  paymentMethod  String   @default("CASH") // CASH, BANK, UPI, CHEQUE
+  referenceNo    String?
+  bankAccountId  String?
+  notes          String?
+  createdAt      DateTime @default(now())
+}
+
+model PartnerProfitAllocation {
+  id                   String    @id @default(uuid())
+  allocationCode       String    @unique
+  periodStart          DateTime
+  periodEnd            DateTime
+  totalBusinessRevenue Float     @default(0)
+  totalBusinessExpense Float     @default(0)
+  totalBusinessProfit  Float     @default(0)
+  partnerId            String
+  partner              Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  sharePercent         Float
+  allocatedProfit      Float
+  status               String    @default("PENDING") // PENDING, SETTLED
+  settledAt            DateTime?
+  notes                String?
+  createdAt            DateTime  @default(now())
+}
+
+model PartnerSettlement {
+  id                 String   @id @default(uuid())
+  settlementCode     String   @unique
+  partnerId          String
+  partner            Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  date               DateTime @default(now())
+  openingBalance     Float
+  capitalAdded       Float    @default(0)
+  capitalWithdrawn   Float    @default(0)
+  profitAdded        Float    @default(0)
+  profitPaid         Float    @default(0)
+  lossAdjustments    Float    @default(0)
+  closingBalance     Float
+  paymentMethod      String?  @default("BANK")
+  referenceNo        String?
+  notes              String?
+  createdAt          DateTime @default(now())
+}
+
+model Customer {
+  id              String         @id @default(uuid())
+  customerCode    String         @unique
+  name            String
+  mobile          String
+  whatsapp        String?
+  email           String?
+  address         String?
+  city            String?
+  occupation      String?
+  referencePerson String?
+  openingBalance  Float          @default(0)
+  currentBalance  Float          @default(0)
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  loans           Loan[]
+  guarantors      Guarantor[]
+  collaterals     Collateral[]
+  payments        LoanPayment[]
+  sales           Sale[]
+  installments    LoanInstallment[]
+}
+
+model Guarantor {
+  id           String   @id @default(uuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name         String
+  mobile       String
+  address      String?
+  relationship String?
+  notes        String?
+  createdAt    DateTime @default(now())
+}
+
+model Collateral {
+  id             String    @id @default(uuid())
+  customerId     String
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  loanId         String?
+  loan           Loan?     @relation(fields: [loanId], references: [id], onDelete: SetNull)
+  type           String    // GOLD, VEHICLE, PROPERTY, DOCUMENTS, OTHER
+  description    String
+  estimatedValue Float     @default(0)
+  documentRef    String?
+  receivedDate   DateTime  @default(now())
+  releasedDate   DateTime?
+  status         String    @default("HELD") // HELD, RELEASED
+  notes          String?
+  createdAt      DateTime  @default(now())
+}
+
+model Loan {
+  id                   String               @id @default(uuid())
+  loanNo               String               @unique
+  customerId           String
+  customer             Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  date                 DateTime             @default(now())
+  principalAmount      Float
+  interestType         String               @default("FLAT") // FLAT, REDUCING, SIMPLE, MANUAL
+  interestRate         Float                // Percentage per frequency or per annum
+  interestFrequency    String               @default("MONTHLY") // DAILY, WEEKLY, MONTHLY, YEARLY
+  paymentFrequency     String               @default("MONTHLY") // DAILY, WEEKLY, MONTHLY
+  totalInstallments    Int                  @default(12)
+  installmentAmount    Float                @default(0)
+  processingFee        Float                @default(0)
+  totalPayable         Float                @default(0)
+  principalPaid        Float                @default(0)
+  interestPaid         Float                @default(0)
+  principalOutstanding Float                @default(0)
+  interestOutstanding  Float                @default(0)
+  dueDate              DateTime?
+  status               String               @default("ACTIVE") // ACTIVE, CLOSED, OVERDUE, DEFAULTED
+  closedAt             DateTime?
+  notes                String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  payments             LoanPayment[]
+  interestTransactions InterestTransaction[]
+  collaterals          Collateral[]
+  installments         LoanInstallment[]
+}
+
+model LoanPayment {
+  id               String   @id @default(uuid())
+  paymentNo        String   @unique
+  loanId           String
+  loan             Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  customerId       String
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  date             DateTime @default(now())
+  amount           Float
+  principalPortion Float    @default(0)
+  interestPortion  Float    @default(0)
+  lateFeePortion   Float    @default(0)
+  paymentMethod    String   @default("CASH") // CASH, BANK, UPI, CHEQUE
+  referenceNo      String?
+  bankAccountId    String?
+  notes            String?
+  createdAt        DateTime @default(now())
+}
+
+model LoanInstallment {
+  id                String    @id @default(uuid())
+  loanId            String
+  loan              Loan      @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  customerId        String
+  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  installmentNumber Int
+  dueDate           DateTime  // Scheduled collection date (never changed upon payment)
+  installmentAmount Float     // Expected collection amount
+  principalPortion  Float     // Scheduled principal portion
+  interestPortion   Float     // Scheduled interest portion
+  paidAmount        Float     @default(0) // Collected amount
+  principalPaid     Float     @default(0)
+  interestPaid      Float     @default(0)
+  status            String    @default("PENDING") // PENDING, COLLECTED, PARTIALLY_PAID, OVERDUE
+  actualPaymentDate DateTime? // Actual date when collected
+  paymentMethod     String?   @default("CASH")
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([loanId, installmentNumber])
+  @@index([dueDate])
+  @@index([customerId])
+  @@index([status])
+}
+
+model InterestTransaction {
+  id             String   @id @default(uuid())
+  loanId         String
+  loan           Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  customerId     String
+  date           DateTime @default(now())
+  amountAccrued  Float    @default(0)
+  amountReceived Float    @default(0)
+  pendingAmount  Float    @default(0)
+  notes          String?
+  createdAt      DateTime @default(now())
+}
+
+model BorrowedLoan {
+  id                String    @id @default(uuid())
+  loanCode          String    @unique
+  lenderName        String
+  contact           String?
+  amount            Float
+  date              DateTime  @default(now())
+  interestRate      Float     @default(0)
+  installmentAmount Float     @default(0)
+  dueDate           DateTime?
+  paidAmount        Float     @default(0)
+  balanceAmount     Float     @default(0)
+  interestPaid      Float     @default(0)
+  paymentMethod     String    @default("BANK")
+  status            String    @default("ACTIVE") // ACTIVE, CLOSED
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model Expense {
+  id            String   @id @default(uuid())
+  expenseNo     String   @unique
+  date          DateTime @default(now())
+  category      String   // RENT, ELECTRICITY, SALARY, FUEL, TRAVEL, INTERNET, PHONE, OFFICE, MAINTENANCE, MARKETING, LEGAL, BANK_CHARGES, INTEREST_EXPENSE, OTHER
+  description   String
+  amount        Float
+  paymentMethod String   @default("CASH") // CASH, BANK, UPI, CHEQUE
+  paidBy        String?  @default("Owner")
+  referenceNo   String?
+  bankAccountId String?
+  receiptUrl    String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model Income {
+  id            String   @id @default(uuid())
+  incomeNo      String   @unique
+  date          DateTime @default(now())
+  type          String   // BUSINESS, INTEREST, COMMISSION, SERVICE, OTHER
+  description   String
+  amount        Float
+  paymentMethod String   @default("CASH") // CASH, BANK, UPI, CHEQUE
+  referenceNo   String?
+  bankAccountId String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model CashAccount {
+  id             String   @id @default("main-cash")
+  name           String   @default("Cash-in-Hand")
+  openingBalance Float    @default(0)
+  currentBalance Float    @default(0)
+  updatedAt      DateTime @updatedAt
+}
+
+model BankAccount {
+  id             String            @id @default(uuid())
+  bankName       String
+  accountName    String
+  accountNumber  String
+  ifsc           String?
+  openingBalance Float             @default(0)
+  currentBalance Float             @default(0)
+  isPrimary      Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  transactions   BankTransaction[]
+}
+
+model BankTransaction {
+  id            String      @id @default(uuid())
+  bankAccountId String
+  bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  date          DateTime    @default(now())
+  type          String      // DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, UPI, CHEQUE, CHARGES
+  amount        Float
+  referenceNo   String?
+  description   String?
+  createdAt     DateTime    @default(now())
+}
+
+model Supplier {
+  id             String     @id @default(uuid())
+  supplierCode   String     @unique
+  name           String
+  mobile         String
+  email          String?
+  address        String?
+  gstin          String?
+  openingBalance Float      @default(0)
+  currentBalance Float      @default(0)
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  purchases      Purchase[]
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
+model Product {
+  id            String          @id @default(uuid())
+  name          String
+  sku           String?         @unique
+  barcode       String?         @unique
+  categoryId    String?
+  category      Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  brand         String?
+  unit          String          @default("PCS") // PCS, KG, BOX, LTR, MTR
+  purchasePrice Float           @default(0)
+  sellingPrice  Float           @default(0)
+  mrp           Float           @default(0)
+  gstPercent    Float           @default(0)
+  openingStock  Int             @default(0)
+  currentStock  Int             @default(0)
+  minStockAlert Int             @default(5)
+  status        String          @default("ACTIVE")
+  description   String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  movements     StockMovement[]
+  saleItems     SaleItem[]
+  purchaseItems PurchaseItem[]
+}
+
+model StockMovement {
+  id          String   @id @default(uuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type        String   // PURCHASE, SALE, RETURN, ADJUSTMENT
+  quantity    Int
+  reason      String?
+  referenceId String?
+  createdAt   DateTime @default(now())
+}
+
+model Sale {
+  id            String     @id @default(uuid())
+  invoiceNo     String     @unique
+  customerId    String?
+  customer      Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  date          DateTime   @default(now())
+  subtotal      Float      @default(0)
+  discount      Float      @default(0)
+  tax           Float      @default(0)
+  grandTotal    Float      @default(0)
+  paidAmount    Float      @default(0)
+  balanceAmount Float      @default(0)
+  paymentMethod String     @default("CASH")
+  status        String     @default("PAID") // PAID, PARTIAL, UNPAID
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  items         SaleItem[]
+}
+
+model SaleItem {
+  id         String  @id @default(uuid())
+  saleId     String
+  sale       Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity   Int
+  unitPrice  Float
+  discount   Float   @default(0)
+  taxPercent Float   @default(0)
+  total      Float
+}
+
+model Purchase {
+  id            String         @id @default(uuid())
+  purchaseNo    String         @unique
+  supplierId    String?
+  supplier      Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  date          DateTime       @default(now())
+  subtotal      Float          @default(0)
+  discount      Float          @default(0)
+  tax           Float          @default(0)
+  grandTotal    Float          @default(0)
+  paidAmount    Float          @default(0)
+  balanceAmount Float          @default(0)
+  paymentMethod String         @default("BANK")
+  status        String         @default("PAID") // PAID, PARTIAL, UNPAID
+  notes         String?
+  createdAt     DateTime       @default(now())
+  items         PurchaseItem[]
+}
+
+model PurchaseItem {
+  id         String   @id @default(uuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity   Int
+  unitPrice  Float
+  discount   Float    @default(0)
+  taxPercent Float    @default(0)
+  total      Float
+}
+
+model Asset {
+  id           String   @id @default(uuid())
+  assetCode    String   @unique
+  assetName    String
+  category     String   @default("EQUIPMENT") // VEHICLE, COMPUTER, FURNITURE, PROPERTY, EQUIPMENT, OTHER
+  purchaseDate DateTime @default(now())
+  purchaseCost Float
+  currentValue Float
+  location     String?
+  status       String   @default("ACTIVE") // ACTIVE, DISPOSED, SOLD
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Liability {
+  id            String    @id @default(uuid())
+  liabilityCode String    @unique
+  name          String
+  type          String    // BANK_LOAN, PRIVATE_LOAN, SUPPLIER_DUE, PARTNER_PAYABLE, OTHER
+  amount        Float
+  dueDate       DateTime?
+  status        String    @default("ACTIVE") // ACTIVE, SETTLED
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model LedgerAccount {
+  id        String        @id @default(uuid())
+  code      String        @unique
+  name      String
+  type      String        // ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE
+  balance   Float         @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  entries   LedgerEntry[]
+}
+
+model LedgerTransaction {
+  id            String        @id @default(uuid())
+  date          DateTime      @default(now())
+  transactionNo String        @unique
+  description   String
+  referenceType String?       // LOAN, INVESTMENT, WITHDRAWAL, PAYMENT, EXPENSE, INCOME, DAY_CLOSE
+  referenceId   String?
+  debitTotal    Float         @default(0)
+  creditTotal   Float         @default(0)
+  createdAt     DateTime      @default(now())
+  entries       LedgerEntry[]
+}
+
+model LedgerEntry {
+  id                  String            @id @default(uuid())
+  ledgerTransactionId String
+  ledgerTransaction   LedgerTransaction @relation(fields: [ledgerTransactionId], references: [id], onDelete: Cascade)
+  accountId           String
+  account             LedgerAccount     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  entryType           String            // DEBIT, CREDIT
+  amount              Float
+}
+
+model DailyClosing {
+  id               String   @id @default(uuid())
+  date             String   @unique // YYYY-MM-DD
+  openingCash      Float    @default(0)
+  totalCollections Float    @default(0)
+  totalIncome      Float    @default(0)
+  totalExpenses    Float    @default(0)
+  totalWithdrawals Float    @default(0)
+  closingCash      Float    @default(0)
+  actualCashCount  Float?   @default(0)
+  difference       Float?   @default(0)
+  status           String   @default("OPEN") // OPEN, CLOSED
+  closedAt         DateTime?
+  closedBy         String?
+  notes            String?
+  createdAt        DateTime @default(now())
+}
+
+model MonthlyClosing {
+  id                 String    @id @default(uuid())
+  month              Int
+  year               Int
+  totalRevenue       Float     @default(0)
+  totalExpenses      Float     @default(0)
+  netProfit          Float     @default(0)
+  partnerProfitTotal Float     @default(0)
+  closedAt           DateTime?
+  closedBy           String?
+  notes              String?
+  createdAt          DateTime  @default(now())
+
+  @@unique([month, year])
+}
+
+model Reminder {
+  id          String    @id @default(uuid())
+  title       String
+  dueDate     DateTime
+  type        String    @default("LOAN_DUE") // LOAN_DUE, INTEREST_DUE, PARTNER_SETTLEMENT, EXPIRY, CUSTOM
+  isCompleted Boolean   @default(false)
+  notes       String?
+  createdAt   DateTime  @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String   // LOGIN, CREATE, UPDATE, DELETE, PAYMENT, INVESTMENT, WITHDRAWAL, DAY_CLOSE, RESTORE, BACKUP
+  entity      String   // PARTNER, LOAN, CUSTOMER, EXPENSE, USER, SYSTEM
+  entityId    String?
+  performedBy String   @default("Admin")
+  details     String?
+  timestamp   DateTime @default(now())
+}
+
+model BackupRecord {
+  id        String   @id @default(uuid())
+  fileName  String
+  filePath  String
+  fileSize  Int      @default(0)
+  status    String   @default("SUCCESS")
+  createdAt DateTime @default(now())
+}
