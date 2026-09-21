@@ -184,8 +184,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="relative flex flex-col w-72 max-w-[80vw] bg-white dark:bg-slate-900 shadow-2xl z-10">
             <div className="flex items-center justify-between h-16 px-4 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
-                  V
+                <div className="w-9 h-9 rounded-lg overflow-hidden bg-white border border-slate-200 dark:border-slate-700 p-0.5 shadow-sm flex items-center justify-center shrink-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                 </div>
                 <div>
                   <div className="font-bold text-sm text-slate-900 dark:text-slate-100">{t.appName}</div>
@@ -255,8 +256,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex items-center justify-between h-16 px-4 border-b border-slate-200 dark:border-slate-800">
           {!collapsed && (
             <Link href="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-base shadow-sm shrink-0">
-                V
+              <div className="w-9 h-9 rounded-lg overflow-hidden bg-white border border-slate-200 dark:border-slate-700 p-0.5 shadow-sm flex items-center justify-center shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
               </div>
               <div className="truncate">
                 <div className="font-bold text-sm text-slate-900 dark:text-slate-100 tracking-tight">
@@ -270,8 +272,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )}
 
           {collapsed && (
-            <div className="w-8 h-8 mx-auto rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-base">
-              V
+            <div className="w-9 h-9 mx-auto rounded-lg overflow-hidden bg-white border border-slate-200 dark:border-slate-700 p-0.5 shadow-sm flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
             </div>
           )}
 

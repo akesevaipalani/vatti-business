@@ -48,8 +48,12 @@ export function LockScreenModal({
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-950/90 backdrop-blur-md animate-fadeIn">
       <div className="w-full max-w-sm p-8 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 text-center">
-        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
-          <Lock className="w-8 h-8" />
+        <div className="relative w-20 h-20 mx-auto mb-4 rounded-2xl overflow-hidden bg-white p-1.5 border border-slate-200 dark:border-slate-700 shadow-md flex items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Company Logo" className="w-full h-full object-contain" />
+          <div className="absolute bottom-0 right-0 p-1 bg-indigo-600 text-white rounded-tl-lg shadow">
+            <Lock className="w-3.5 h-3.5" />
+          </div>
         </div>
 
         <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">

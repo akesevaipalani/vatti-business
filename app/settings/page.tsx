@@ -315,6 +315,24 @@ export default function SettingsPage() {
                 </p>
               </div>
 
+              {/* Company Logo Badge */}
+              <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                <div className="w-16 h-16 rounded-xl overflow-hidden bg-white border border-slate-200 dark:border-slate-700 p-1 flex items-center justify-center shrink-0 shadow-sm">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.png" alt="Company Logo" className="w-full h-full object-contain" />
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-slate-800 dark:text-slate-100">
+                    {lang === "ta" ? "நிறுவன லோகோ (Company Logo)" : "Company Logo"}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {lang === "ta"
+                      ? "அனைத்து சாதனங்கள் மற்றும் ரசீதுகளில் அதிகாரப்பூர்வ லோகோ காட்டப்படுகிறது"
+                      : "Official business emblem displayed across mobile devices, desktop, and receipts"}
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">

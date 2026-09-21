@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/manifest.json",
   "/favicon.ico",
   "/icon.png",
+  "/logo.png",
 ];
 
 // Admin-only paths
