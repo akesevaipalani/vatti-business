@@ -77,4 +77,17 @@ if (fs.existsSync(dbSrc)) {
   console.log(`[standalone-assets] Synced template vatti.db in standalone`);
 }
 
+// 6. Ensure standalone server binds to 0.0.0.0 on container hosts
+const standaloneServerPath = path.join(standaloneDir, 'server.js');
+if (fs.existsSync(standaloneServerPath)) {
+  let content = fs.readFileSync(standaloneServerPath, 'utf-8');
+  content = content.replace(
+    /const hostname = process\.env\.HOSTNAME \|\| '0\.0\.0\.0'/,
+    "const hostname = (process.env.HOSTNAME === '127.0.0.1' || process.env.HOSTNAME === 'localhost') ? process.env.HOSTNAME : '0.0.0.0'"
+  );
+  fs.writeFileSync(standaloneServerPath, content);
+  console.log('[standalone-assets] Ensured standalone server binds to 0.0.0.0 on container hosts');
+}
+
 console.log('[standalone-assets] Assets successfully synced to standalone runtime.\n');
+

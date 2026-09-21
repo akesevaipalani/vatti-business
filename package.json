@@ -10,7 +10,7 @@
     "build": "next build",
     "postbuild": "node scripts/copy-standalone-assets.js",
     "postinstall": "prisma generate",
-    "start": "node .next/standalone/server.js",
+    "start": "node server.js",
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
