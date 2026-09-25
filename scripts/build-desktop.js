@@ -4,7 +4,11 @@ const path = require('path');
 
 function run(cmd) {
   console.log(`\n>>> Executing: ${cmd}`);
-  execSync(cmd, { stdio: 'inherit', cwd: path.resolve(__dirname, '..') });
+  execSync(cmd, {
+    stdio: 'inherit',
+    cwd: path.resolve(__dirname, '..'),
+    env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=4096' },
+  });
 }
 
 function copyFolderSync(from, to) {
@@ -131,7 +135,23 @@ async function buildDesktop() {
   }
 }
 
-buildDesktop().catch(err => {
-  console.error('Build failed:', err);
-  process.exit(1);
-});
+buildDesktop()
+  .catch(err => {
+    console.error('Build failed:', err);
+    process.exit(1);
+  })
+  .finally(() => {
+    // Restore PostgreSQL Prisma schema for cloud/dev environment
+    const rootDir = path.resolve(__dirname, '..');
+    const pgSchema = path.join(rootDir, 'prisma', 'schema.postgresql.prisma');
+    const activeSchema = path.join(rootDir, 'prisma', 'schema.prisma');
+    if (fs.existsSync(pgSchema)) {
+      fs.copyFileSync(pgSchema, activeSchema);
+      console.log('\n[Post-Build] Restored active schema to prisma/schema.postgresql.prisma');
+      try {
+        execSync('npx prisma generate', { stdio: 'inherit', cwd: rootDir });
+      } catch (e) {
+        console.warn('Failed to regenerate Prisma client in finally:', e.message);
+      }
+    }
+  });
