@@ -9,8 +9,6 @@ import {
   Save,
   CheckCircle2,
   AlertTriangle,
-  RotateCcw,
-  ShieldAlert,
 } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 
@@ -28,16 +26,32 @@ interface SettingsPayload {
   ifsc: string;
   upiId: string;
   pinCode: string;
-  newPassword?: string;
 }
 
 export default function SettingsPage() {
   const { lang, setLang, t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<"business" | "banking" | "security" | "preferences" | "demo">("business");
+  const [activeTab, setActiveTab] = useState<"business" | "banking" | "security" | "preferences">("business");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Current session user
+  const [currentUser, setCurrentUser] = useState<{
+    userId: string;
+    username: string;
+    role: string;
+    name: string;
+    partnerId?: string | null;
+  } | null>(null);
+
+  // Partner self password change form
+  const [partnerPasswordData, setPartnerPasswordData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [savingPartnerPassword, setSavingPartnerPassword] = useState(false);
 
   // Business Profile Form
   const [formData, setFormData] = useState({
@@ -55,22 +69,43 @@ export default function SettingsPage() {
     upiId: "",
   });
 
-  // Security Form
+  // Security Form (Admin)
   const [securityData, setSecurityData] = useState({
     username: "admin",
-    newPassword: "",
-    confirmPassword: "",
     pinCode: "1234",
   });
 
-  // Demo Reset Modal
-  const [showDemoModal, setShowDemoModal] = useState(false);
-  const [resettingDemo, setResettingDemo] = useState(false);
-  const [demoSuccess, setDemoSuccess] = useState(false);
+  // Admin password change form
+  const [adminPasswordData, setAdminPasswordData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [savingAdminPassword, setSavingAdminPassword] = useState(false);
+  const [adminPwdSuccessMsg, setAdminPwdSuccessMsg] = useState("");
+  const [adminPwdErrorMsg, setAdminPwdErrorMsg] = useState("");
+
+
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
+      // 1. Fetch current authenticated user session
+      const authRes = await fetch("/api/auth/me");
+      if (authRes.ok) {
+        const authData = await authRes.json();
+        if (authData && authData.authenticated && authData.user) {
+          setCurrentUser(authData.user);
+          // If non-admin (PARTNER), set tab to security and skip admin-only /api/settings
+          if (authData.user.role !== "ADMIN") {
+            setActiveTab("security");
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      // 2. If ADMIN, fetch business profile and admin security
       const res = await fetch("/api/settings");
       if (res.ok) {
         const data = await res.json();
@@ -109,17 +144,285 @@ export default function SettingsPage() {
     fetchSettings();
   }, [fetchSettings]);
 
+  const handlePartnerPasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingPartnerPassword(true);
+    setErrorMsg("");
+    setSuccessMsg("");
+
+    if (
+      !partnerPasswordData.currentPassword.trim() ||
+      !partnerPasswordData.newPassword.trim() ||
+      !partnerPasswordData.confirmPassword.trim()
+    ) {
+      setErrorMsg(
+        lang === "ta"
+          ? "அனைத்து கடவுச்சொல் புலங்களையும் நிரப்பவும்."
+          : "Current password, new password, and confirmation are required."
+      );
+      setSavingPartnerPassword(false);
+      return;
+    }
+
+    if (partnerPasswordData.newPassword !== partnerPasswordData.confirmPassword) {
+      setErrorMsg(
+        lang === "ta"
+          ? "புதிய கடவுச்சொற்கள் பொருந்தவில்லை."
+          : "New password and confirm password do not match."
+      );
+      setSavingPartnerPassword(false);
+      return;
+    }
+
+    if (partnerPasswordData.newPassword.length < 6) {
+      setErrorMsg(
+        lang === "ta"
+          ? "புதிய கடவுச்சொல் குறைந்தது 6 எழுத்துக்களாக இருக்க வேண்டும்."
+          : "New password must be at least 6 characters long."
+      );
+      setSavingPartnerPassword(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          currentPassword: partnerPasswordData.currentPassword,
+          newPassword: partnerPasswordData.newPassword,
+          confirmPassword: partnerPasswordData.confirmPassword,
+        }),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json") || res.status === 404) {
+        setErrorMsg(
+          lang === "ta"
+            ? "சர்வர் தவறான பதிலை அளித்துள்ளது (404/HTML). சர்வர் இணைப்பை சரிபார்க்கவும்."
+            : "Server returned an unexpected response (404/HTML). Please verify server connection."
+        );
+        return;
+      }
+
+      if (res.status === 401) {
+        setErrorMsg(
+          lang === "ta"
+            ? "அங்கீகாரம் காலாவதியானது. தயவுசெய்து மீண்டும் உள்நுழையவும்."
+            : "Session expired or unauthorized. Please log in again."
+        );
+        return;
+      }
+
+      let data: { success?: boolean; error?: string; message?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setErrorMsg(
+          lang === "ta"
+            ? "சர்வரிலிருந்து தவறான பதில் வந்தது."
+            : "Server returned an invalid JSON response."
+        );
+        return;
+      }
+
+      if (res.ok && data.success) {
+        setSuccessMsg(
+          lang === "ta"
+            ? "கடவுச்சொல் வெற்றிகரமாக மாற்றப்பட்டது!"
+            : "Password changed successfully!"
+        );
+        // Clear passwords immediately
+        setPartnerPasswordData({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        });
+        setTimeout(() => setSuccessMsg(""), 5000);
+      } else {
+        const errMsg = String(data?.error || data?.message || "");
+        if (
+          errMsg.includes("Current password is incorrect") ||
+          errMsg.includes("Incorrect current password") ||
+          errMsg.includes("தவறா")
+        ) {
+          setErrorMsg(
+            lang === "ta"
+              ? "தற்போதைய கடவுச்சொல் தவறாக உள்ளது."
+              : "Current password is incorrect."
+          );
+        } else {
+          setErrorMsg(
+            data?.error ||
+              (lang === "ta"
+                ? "கடவுச்சொல் மாற்ற முடியவில்லை."
+                : "Failed to change password.")
+          );
+        }
+      }
+    } catch {
+      setErrorMsg(
+        lang === "ta"
+          ? "பிணையப் பிழை அல்லது சர்வர் கிடைக்கவில்லை. தயவுசெய்து மீண்டும் முயற்சிக்கவும்."
+          : "Network error or server unavailable. Please try again."
+      );
+    } finally {
+      setSavingPartnerPassword(false);
+    }
+  };
+
+  const handleAdminPasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingAdminPassword(true);
+    setAdminPwdErrorMsg("");
+    setAdminPwdSuccessMsg("");
+
+    // 1. Validate required fields
+    if (
+      !adminPasswordData.currentPassword.trim() ||
+      !adminPasswordData.newPassword.trim() ||
+      !adminPasswordData.confirmPassword.trim()
+    ) {
+      setAdminPwdErrorMsg(
+        lang === "ta"
+          ? "அனைத்து கடவுச்சொல் புலங்களையும் நிரப்பவும்."
+          : "Current password, new password, and confirmation are required."
+      );
+      setSavingAdminPassword(false);
+      return;
+    }
+
+    // 2. Validate matching passwords
+    if (adminPasswordData.newPassword !== adminPasswordData.confirmPassword) {
+      setAdminPwdErrorMsg(
+        lang === "ta"
+          ? "புதிய கடவுச்சொற்கள் பொருந்தவில்லை."
+          : "New password and confirm password do not match."
+      );
+      setSavingAdminPassword(false);
+      return;
+    }
+
+    // 3. Enforce policy (min 6 characters)
+    if (adminPasswordData.newPassword.length < 6) {
+      setAdminPwdErrorMsg(
+        lang === "ta"
+          ? "புதிய கடவுச்சொல் குறைந்தது 6 எழுத்துக்களாக இருக்க வேண்டும்."
+          : "New password must be at least 6 characters long."
+      );
+      setSavingAdminPassword(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          currentPassword: adminPasswordData.currentPassword,
+          newPassword: adminPasswordData.newPassword,
+          confirmPassword: adminPasswordData.confirmPassword,
+        }),
+      });
+
+      // Check for HTML / 404 responses
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json") || res.status === 404) {
+        setAdminPwdErrorMsg(
+          lang === "ta"
+            ? "சர்வர் தவறான பதிலை அளித்துள்ளது (404/HTML). சர்வர் இணைப்பை சரிபார்க்கவும்."
+            : "Server returned an unexpected response (404/HTML). Please verify server connection."
+        );
+        return;
+      }
+
+      // Check for expired session / unauthorized (401)
+      if (res.status === 401) {
+        setAdminPwdErrorMsg(
+          lang === "ta"
+            ? "அங்கீகாரம் காலாவதியானது. தயவுசெய்து மீண்டும் உள்நுழையவும்."
+            : "Session expired or unauthorized. Please log in again."
+        );
+        return;
+      }
+
+      let data: { success?: boolean; error?: string; message?: string } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setAdminPwdErrorMsg(
+          lang === "ta"
+            ? "சர்வரிலிருந்து தவறான பதில் வந்தது."
+            : "Server returned an invalid JSON response."
+        );
+        return;
+      }
+
+      if (res.ok && data.success) {
+        setAdminPwdSuccessMsg(
+          lang === "ta"
+            ? "கடவுச்சொல் வெற்றிகரமாக மாற்றப்பட்டது!"
+            : "Password changed successfully!"
+        );
+        // Clear all password fields immediately
+        setAdminPasswordData({
+          currentPassword: "",
+          newPassword: "",
+          confirmPassword: "",
+        });
+        // Re-authenticate / refresh current user session in memory
+        try {
+          const authRes = await fetch("/api/auth/me");
+          if (authRes.ok) {
+            const authData = await authRes.json();
+            if (authData?.user) setCurrentUser(authData.user);
+          }
+        } catch {}
+        setTimeout(() => setAdminPwdSuccessMsg(""), 5000);
+      } else {
+        // Check for incorrect current password with exact bilingual message
+        const errMsg = String(data?.error || data?.message || "");
+        if (
+          errMsg.includes("Current password is incorrect") ||
+          errMsg.includes("Incorrect current password") ||
+          errMsg.includes("தவறா")
+        ) {
+          setAdminPwdErrorMsg(
+            lang === "ta"
+              ? "தற்போதைய கடவுச்சொல் தவறாக உள்ளது."
+              : "Current password is incorrect."
+          );
+        } else {
+          setAdminPwdErrorMsg(
+            data?.error ||
+              (lang === "ta"
+                ? "கடவுச்சொல் மாற்ற முடியவில்லை."
+                : "Failed to change password.")
+          );
+        }
+      }
+    } catch {
+      setAdminPwdErrorMsg(
+        lang === "ta"
+          ? "பிணையப் பிழை அல்லது சர்வர் கிடைக்கவில்லை. தயவுசெய்து மீண்டும் முயற்சிக்கவும்."
+          : "Network error or server unavailable. Please try again."
+      );
+    } finally {
+      setSavingAdminPassword(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setErrorMsg("");
     setSuccessMsg("");
-
-    if (securityData.newPassword && securityData.newPassword !== securityData.confirmPassword) {
-      setErrorMsg(lang === "ta" ? "கடவுச்சொற்கள் பொருந்தவில்லை" : "New passwords do not match");
-      setSaving(false);
-      return;
-    }
 
     if (securityData.pinCode && securityData.pinCode.length !== 4) {
       setErrorMsg(lang === "ta" ? "PIN 4 இலக்கங்களாக இருக்க வேண்டும்" : "PIN must be exactly 4 digits");
@@ -132,9 +435,6 @@ export default function SettingsPage() {
         ...formData,
         pinCode: securityData.pinCode,
       };
-      if (securityData.newPassword) {
-        payload.newPassword = securityData.newPassword;
-      }
 
       const res = await fetch("/api/settings", {
         method: "PUT",
@@ -148,7 +448,6 @@ export default function SettingsPage() {
             ? "அமைப்புகள் வெற்றிகரமாக சேமிக்கப்பட்டன!"
             : "Settings saved successfully!"
         );
-        setSecurityData((prev) => ({ ...prev, newPassword: "", confirmPassword: "" }));
         setTimeout(() => setSuccessMsg(""), 4000);
       } else {
         const data = await res.json();
@@ -162,34 +461,7 @@ export default function SettingsPage() {
     }
   };
 
-  const handleResetDemo = async () => {
-    setResettingDemo(true);
-    setErrorMsg("");
-    try {
-      const res = await fetch("/api/settings/demo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "RESET_DEMO" }),
-      });
 
-      if (res.ok) {
-        setDemoSuccess(true);
-        setTimeout(() => {
-          setShowDemoModal(false);
-          setDemoSuccess(false);
-          window.location.reload();
-        }, 1500);
-      } else {
-        const data = await res.json();
-        setErrorMsg(data.error || "Failed to reset demo data");
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "An error occurred";
-      setErrorMsg(msg);
-    } finally {
-      setResettingDemo(false);
-    }
-  };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-12">
@@ -197,30 +469,46 @@ export default function SettingsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
-            <Building2 className="w-7 h-7 text-emerald-600" />
-            {lang === "ta" ? "கணினி மற்றும் வணிக அமைப்புகள்" : "System & Business Settings"}
+            {currentUser?.role === "ADMIN" ? (
+              <Building2 className="w-7 h-7 text-emerald-600" />
+            ) : (
+              <Lock className="w-7 h-7 text-emerald-600" />
+            )}
+            {currentUser?.role === "ADMIN"
+              ? lang === "ta"
+                ? "கணினி மற்றும் வணிக அமைப்புகள்"
+                : "System & Business Settings"
+              : lang === "ta"
+              ? "சுயவிவரம் & பாதுகாப்பு அமைப்புகள்"
+              : "Profile & Security Settings"}
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            {lang === "ta"
-              ? "வணிக முகவரி, வங்கி விவரங்கள், பாதுகாப்பு மற்றும் தனிப்பட்ட விருப்பங்கள்"
-              : "Manage business identity, bank accounts, admin authentication, and system preferences"}
+            {currentUser?.role === "ADMIN"
+              ? lang === "ta"
+                ? "வணிக முகவரி, வங்கி விவரங்கள், பாதுகாப்பு மற்றும் தனிப்பட்ட விருப்பங்கள்"
+                : "Manage business identity, bank accounts, admin authentication, and system preferences"
+              : lang === "ta"
+              ? "உங்கள் கணக்கு விவரங்களை சரிபார்த்து உள்நுழைவு கடவுச்சொல்லை மாற்றவும்"
+              : "View your partner profile details and manage your login password securely"}
           </p>
         </div>
 
-        <button
-          onClick={handleSave}
-          disabled={saving || loading}
-          className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl shadow-sm transition-all disabled:opacity-50"
-        >
-          <Save className="w-4 h-4" />
-          {saving
-            ? lang === "ta"
-              ? "சேமிக்கிறது..."
-              : "Saving..."
-            : lang === "ta"
-            ? "மாற்றங்களைச் சேமி"
-            : "Save Changes"}
-        </button>
+        {currentUser?.role === "ADMIN" && (
+          <button
+            onClick={handleSave}
+            disabled={saving || loading}
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl shadow-sm transition-all disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" />
+            {saving
+              ? lang === "ta"
+                ? "சேமிக்கிறது..."
+                : "Saving..."
+              : lang === "ta"
+              ? "மாற்றங்களைச் சேமி"
+              : "Save Changes"}
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -240,61 +528,63 @@ export default function SettingsPage() {
 
       {/* Navigation Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700 overflow-x-auto gap-2">
-        <button
-          onClick={() => setActiveTab("business")}
-          className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
-            activeTab === "business"
-              ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
-              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
-        >
-          <Building2 className="w-4 h-4" />
-          {lang === "ta" ? "வணிக விவரங்கள்" : "Business Profile"}
-        </button>
-        <button
-          onClick={() => setActiveTab("banking")}
-          className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
-            activeTab === "banking"
-              ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
-              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
-        >
-          <CreditCard className="w-4 h-4" />
-          {lang === "ta" ? "வங்கி & UPI" : "Banking & UPI"}
-        </button>
-        <button
-          onClick={() => setActiveTab("security")}
-          className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
-            activeTab === "security"
-              ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
-              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
-        >
-          <Lock className="w-4 h-4" />
-          {lang === "ta" ? "பாதுகாப்பு & PIN" : "Security & PIN"}
-        </button>
-        <button
-          onClick={() => setActiveTab("preferences")}
-          className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
-            activeTab === "preferences"
-              ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
-              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
-        >
-          <Globe className="w-4 h-4" />
-          {lang === "ta" ? "விருப்பத்தேர்வுகள்" : "Preferences"}
-        </button>
-        <button
-          onClick={() => setActiveTab("demo")}
-          className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
-            activeTab === "demo"
-              ? "border-amber-600 text-amber-600 dark:text-amber-400 font-semibold"
-              : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          }`}
-        >
-          <RotateCcw className="w-4 h-4" />
-          {lang === "ta" ? "மாதிரி தரவு மீட்டமைப்பு" : "Demo Data Reset"}
-        </button>
+        {currentUser?.role === "ADMIN" ? (
+          <>
+            <button
+              onClick={() => setActiveTab("business")}
+              className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+                activeTab === "business"
+                  ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
+                  : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              <Building2 className="w-4 h-4" />
+              {lang === "ta" ? "வணிக விவரங்கள்" : "Business Profile"}
+            </button>
+            <button
+              onClick={() => setActiveTab("banking")}
+              className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+                activeTab === "banking"
+                  ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
+                  : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              {lang === "ta" ? "வங்கி & UPI" : "Banking & UPI"}
+            </button>
+            <button
+              onClick={() => setActiveTab("security")}
+              className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+                activeTab === "security"
+                  ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
+                  : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              <Lock className="w-4 h-4" />
+              {lang === "ta" ? "பாதுகாப்பு & PIN" : "Security & PIN"}
+            </button>
+            <button
+              onClick={() => setActiveTab("preferences")}
+              className={`px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+                activeTab === "preferences"
+                  ? "border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold"
+                  : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              }`}
+            >
+              <Globe className="w-4 h-4" />
+              {lang === "ta" ? "விருப்பத்தேர்வுகள்" : "Preferences"}
+            </button>
+
+          </>
+        ) : (
+          <button
+            onClick={() => setActiveTab("security")}
+            className="px-4 py-3 font-medium text-sm flex items-center gap-2 border-b-2 border-emerald-600 text-emerald-600 dark:text-emerald-400 font-semibold whitespace-nowrap"
+          >
+            <Lock className="w-4 h-4" />
+            {lang === "ta" ? "சுயவிவரம் & கடவுச்சொல்" : "Profile & Security"}
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -514,79 +804,283 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* TAB 3: Security & PIN */}
+          {/* TAB 3: Security & PIN / Partner Change Password */}
           {activeTab === "security" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-bold text-slate-800 dark:text-white">
-                  {lang === "ta" ? "நிர்வாகி பாதுகாப்பு & விரைவுத் திரை பூட்டு" : "Admin Security & Screen Lock PIN"}
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {lang === "ta"
-                    ? "முக்கிய கணக்கு கடவுச்சொல் மற்றும் விரைவு 4-இலக்க PIN ஐ மாற்றவும்"
-                    : "Update your login password and the 4-digit PIN used for desktop instant locking."}
-                </p>
+            currentUser?.role !== "ADMIN" ? (
+              <div className="space-y-6">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800 dark:text-white">
+                    {lang === "ta" ? "பங்காளி சுயவிவரம் & பாதுகாப்பு" : "Partner Profile & Security"}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {lang === "ta"
+                      ? "உங்கள் கணக்கு விவரங்களை சரிபார்த்து உள்நுழைவு கடவுச்சொல்லை மாற்றவும்."
+                      : "Manage your credentials and change your login password securely."}
+                  </p>
+                </div>
+
+                {/* Partner Identity Card */}
+                {currentUser && (
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                        {lang === "ta" ? "பயனர் பெயர்" : "Username"}
+                      </div>
+                      <div className="font-mono text-sm font-bold text-slate-800 dark:text-slate-200 mt-1">
+                        {currentUser.username}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                        {lang === "ta" ? "பங்காளி பெயர்" : "Partner Name"}
+                      </div>
+                      <div className="text-sm font-semibold text-slate-800 dark:text-slate-200 mt-1">
+                        {currentUser.name}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                        {lang === "ta" ? "பொறுப்பு / பங்காளி எண்" : "Role / Partner ID"}
+                      </div>
+                      <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
+                        {currentUser.role} {currentUser.partnerId ? `(${currentUser.partnerId})` : ""}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Change Password Form */}
+                <form onSubmit={handlePartnerPasswordChange} className="space-y-5 max-w-xl">
+                  <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-1">
+                      {lang === "ta" ? "கடவுச்சொல் மாற்றுதல்" : "Change Password"}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                      {lang === "ta"
+                        ? "தற்போதைய கடவுச்சொல்லை உள்ளிட்ட பிறகு புதிய கடவுச்சொல்லை அமைக்கவும்."
+                        : "Enter your current password to authenticate, then set your new password."}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                      {lang === "ta" ? "தற்போதைய கடவுச்சொல் *" : "Current Password *"}
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={partnerPasswordData.currentPassword}
+                      onChange={(e) =>
+                        setPartnerPasswordData({ ...partnerPasswordData, currentPassword: e.target.value })
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                        {lang === "ta" ? "புதிய கடவுச்சொல் *" : "New Password *"}
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={partnerPasswordData.newPassword}
+                        onChange={(e) =>
+                          setPartnerPasswordData({ ...partnerPasswordData, newPassword: e.target.value })
+                        }
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="Min. 6 characters"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                        {lang === "ta" ? "புதிய கடவுச்சொல்லை உறுதிப்படுத்துக *" : "Confirm New Password *"}
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={partnerPasswordData.confirmPassword}
+                        onChange={(e) =>
+                          setPartnerPasswordData({ ...partnerPasswordData, confirmPassword: e.target.value })
+                        }
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="Re-enter new password"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={savingPartnerPassword}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl shadow-sm transition-all disabled:opacity-50"
+                    >
+                      <Lock className="w-4 h-4" />
+                      {savingPartnerPassword
+                        ? lang === "ta"
+                          ? "மாற்றுகிறது..."
+                          : "Updating Password..."
+                        : lang === "ta"
+                        ? "கடவுச்சொல்லை மாற்று"
+                        : "Change Password"}
+                    </button>
+                  </div>
+                </form>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            ) : (
+              <div className="space-y-8">
+                {/* 1. SEPARATE SCREEN LOCK PIN SETTING */}
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
-                    {lang === "ta" ? "நிர்வாகி பயனர் பெயர்" : "Administrator Username"}
-                  </label>
-                  <input
-                    type="text"
-                    value={securityData.username}
-                    disabled
-                    className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-500 cursor-not-allowed"
-                  />
-                  <span className="text-[11px] text-slate-400 mt-1 block">Default admin account (fixed)</span>
+                  <h2 className="text-lg font-bold text-slate-800 dark:text-white">
+                    {lang === "ta" ? "விரைவுத் திரை பூட்டு PIN" : "Screen Lock PIN"}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {lang === "ta"
+                      ? "டெஸ்க்டாப் விரைவுத் திரை பூட்டிற்கான 4-இலக்க PIN ஐ உள்ளமைக்கவும் (மாற்றங்களைச் சேமிக்க மேலே உள்ள பொத்தானை அழுத்தவும்)."
+                      : "Configure the 4-digit PIN used for desktop instant locking. Click Save Changes above to save."}
+                  </p>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
-                    {lang === "ta" ? "விரைவு பூட்டு 4-இலக்க PIN *" : "Screen Lock 4-Digit PIN *"}
-                  </label>
-                  <input
-                    type="password"
-                    maxLength={4}
-                    value={securityData.pinCode}
-                    onChange={(e) => setSecurityData({ ...formData, ...securityData, pinCode: e.target.value.replace(/\D/g, "") })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono tracking-widest text-center text-lg font-bold focus:ring-2 focus:ring-emerald-500 outline-none"
-                    placeholder="1234"
-                  />
-                  <span className="text-[11px] text-slate-400 mt-1 block">
-                    Used to quickly unlock the screen with one touch
-                  </span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                      {lang === "ta" ? "நிர்வாகி பயனர் பெயர்" : "Administrator Username"}
+                    </label>
+                    <input
+                      type="text"
+                      value={securityData.username}
+                      disabled
+                      className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-mono text-slate-500 cursor-not-allowed"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">Default admin account (fixed)</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                      {lang === "ta" ? "விரைவு பூட்டு 4-இலக்க PIN *" : "Screen Lock 4-Digit PIN *"}
+                    </label>
+                    <input
+                      type="password"
+                      maxLength={4}
+                      value={securityData.pinCode}
+                      onChange={(e) => setSecurityData((prev) => ({ ...prev, pinCode: e.target.value.replace(/\D/g, "") }))}
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl font-mono tracking-widest text-center text-lg font-bold focus:ring-2 focus:ring-emerald-500 outline-none"
+                      placeholder="1234"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">
+                      {lang === "ta"
+                        ? "திரையை விரைவாகப் பூட்ட/திறக்கப் பயன்படுகிறது (சேமிக்க மேலே மாற்றங்களைச் சேமி அழுத்தவும்)."
+                        : "Used to quickly unlock the screen with one touch (save via Save Changes above)."}
+                    </span>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
-                    {lang === "ta" ? "புதிய கடவுச்சொல் (மாற்ற வேண்டுமெனில்)" : "New Password (Optional)"}
-                  </label>
-                  <input
-                    type="password"
-                    value={securityData.newPassword}
-                    onChange={(e) => setSecurityData({ ...securityData, newPassword: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                    placeholder="Leave blank to keep unchanged"
-                  />
-                </div>
+                {/* 2. DEDICATED CHANGE ADMIN PASSWORD SECTION */}
+                <div className="border-t border-slate-200 dark:border-slate-800 pt-6 space-y-5">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                      <Lock className="w-5 h-5 text-emerald-600" />
+                      {lang === "ta" ? "நிர்வாகி கடவுச்சொல் மாற்றுதல்" : "Change Admin Password"}
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      {lang === "ta"
+                        ? "தற்போதைய கடவுச்சொல்லை உள்ளிட்ட பிறகு புதிய கடவுச்சொல்லை அமைக்கவும்."
+                        : "Enter your current password to authenticate, then set your new password."}
+                    </p>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
-                    {lang === "ta" ? "புதிய கடவுச்சொல்லை உறுதிப்படுத்துக" : "Confirm New Password"}
-                  </label>
-                  <input
-                    type="password"
-                    value={securityData.confirmPassword}
-                    onChange={(e) => setSecurityData({ ...securityData, confirmPassword: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                    placeholder="Re-enter new password"
-                  />
-                </div>
+                  {/* Admin Password Change Messages */}
+                  {adminPwdSuccessMsg && (
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-3 text-emerald-800 dark:text-emerald-200">
+                      <CheckCircle2 className="w-5 h-5 flex-shrink-0 text-emerald-600" />
+                      <span className="font-medium text-sm">{adminPwdSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {adminPwdErrorMsg && (
+                    <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center gap-3 text-rose-800 dark:text-rose-200">
+                      <AlertTriangle className="w-5 h-5 flex-shrink-0 text-rose-600" />
+                      <span className="font-medium text-sm">{adminPwdErrorMsg}</span>
+                    </div>
+                  )}
+
+                  {/* Change Admin Password Form */}
+                  <form onSubmit={handleAdminPasswordChange} className="space-y-5 max-w-xl">
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                      {lang === "ta" ? "தற்போதைய கடவுச்சொல் *" : "Current Password *"}
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={adminPasswordData.currentPassword}
+                      onChange={(e) =>
+                        setAdminPasswordData({ ...adminPasswordData, currentPassword: e.target.value })
+                      }
+                      className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                        {lang === "ta" ? "புதிய கடவுச்சொல் *" : "New Password *"}
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={adminPasswordData.newPassword}
+                        onChange={(e) =>
+                          setAdminPasswordData({ ...adminPasswordData, newPassword: e.target.value })
+                        }
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="Min. 6 characters"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1.5">
+                        {lang === "ta" ? "புதிய கடவுச்சொல்லை உறுதிப்படுத்துக *" : "Confirm New Password *"}
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        value={adminPasswordData.confirmPassword}
+                        onChange={(e) =>
+                          setAdminPasswordData({ ...adminPasswordData, confirmPassword: e.target.value })
+                        }
+                        className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                        placeholder="Re-enter new password"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={savingAdminPassword}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl shadow-sm transition-all disabled:opacity-50"
+                    >
+                      <Lock className="w-4 h-4" />
+                      {savingAdminPassword
+                        ? lang === "ta"
+                          ? "மாற்றுகிறது..."
+                          : "Updating Password..."
+                        : lang === "ta"
+                        ? "கடவுச்சொல்லை மாற்று"
+                        : "Change Password"}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
-          )}
+          )
+        )}
 
           {/* TAB 4: System & Preferences */}
           {activeTab === "preferences" && (
@@ -685,112 +1179,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* TAB 5: Demo Data Reset */}
-          {activeTab === "demo" && (
-            <div className="space-y-6">
-              <div className="p-6 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="space-y-1 max-w-xl">
-                  <div className="flex items-center gap-2 text-amber-800 dark:text-amber-200 font-bold text-base">
-                    <AlertTriangle className="w-5 h-5 text-amber-600" />
-                    {lang === "ta" ? "மாதிரி தரவு மீட்டமைப்பு (Demo Reset)" : "Reset to Sample Demo Dataset"}
-                  </div>
-                  <p className="text-xs text-amber-700/80 dark:text-amber-300/80 leading-relaxed">
-                    {lang === "ta"
-                      ? "இது சோதனைக்காக 3 கூட்டாளிகள், 10 வாடிக்கையாளர்கள், 5 கடன்கள், ரொக்க மற்றும் வங்கி இருப்புக்களுடன் கூடிய மாதிரி வணிகத் தரவை மீண்டும் உருவாக்கும்."
-                      : "This will re-seed realistic sample business records (3 Partners, 10 Customers, 5 Active Loans with schedules, cash/bank balances, income and expenses) for testing and demonstration."}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowDemoModal(true)}
-                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-xl shadow-sm transition-all whitespace-nowrap flex items-center gap-2"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  {lang === "ta" ? "மீட்டமைக்கத் தொடங்கு" : "Re-Seed Demo Data"}
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                    Partners Created
-                  </span>
-                  <p className="text-sm font-bold text-slate-800 dark:text-white">
-                    S. Karuppasamy, M. Muthu, R. Selvaraj
-                  </p>
-                </div>
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                    Sample Loan Types
-                  </span>
-                  <p className="text-sm font-bold text-slate-800 dark:text-white">
-                    Flat Interest, Reducing EMI, Simple Interest
-                  </p>
-                </div>
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                    Admin Account
-                  </span>
-                  <p className="text-sm font-bold text-slate-800 dark:text-white font-mono">
-                    {securityData.username || "admin"} (PIN: {securityData.pinCode ? securityData.pinCode : "Configured"})
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Confirmation Modal for Demo Data Reset */}
-      {showDemoModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-800 max-w-md w-full rounded-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-5 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-rose-600">
-              <div className="p-3 bg-rose-100 dark:bg-rose-900/40 rounded-xl">
-                <ShieldAlert className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  {lang === "ta" ? "மாதிரி தரவை மீட்டமைக்கவா?" : "Confirm Demo Data Reset?"}
-                </h3>
-                <p className="text-xs text-slate-500">Irreversible Action for Sample Demonstration</p>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              {lang === "ta"
-                ? "நீங்கள் மாதிரித் தரவை மீட்டமைக்க விரும்புகிறீர்களா? இது முந்தைய தரவுகளை அழித்து புதிய மாதிரி கணக்குகளை உருவாக்கும்."
-                : "Are you sure you want to reset the database to sample demo data? This will overwrite the current operational data with realistic sample business records."}
-            </p>
-
-            {demoSuccess ? (
-              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-emerald-800 dark:text-emerald-200 text-sm font-semibold flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                Demo data reset complete! Reloading...
-              </div>
-            ) : (
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  disabled={resettingDemo}
-                  onClick={() => setShowDemoModal(false)}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700 rounded-xl transition-all"
-                >
-                  {t.cancel}
-                </button>
-                <button
-                  type="button"
-                  disabled={resettingDemo}
-                  onClick={handleResetDemo}
-                  className="px-5 py-2 text-sm font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
-                >
-                  {resettingDemo && <RotateCcw className="w-4 h-4 animate-spin" />}
-                  {resettingDemo ? "Resetting..." : lang === "ta" ? "ஆம், மீட்டமை" : "Yes, Reset Now"}
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { postLoanCollection } from "@/lib/accounting/engine";
 import { getCurrentUser } from "@/lib/auth/session";
 import { syncEvents } from "@/lib/sync/events";
+import { getNextReceiptNumber } from "@/lib/documents/numbering";
 
 export async function POST(
   req: Request,
@@ -47,7 +48,7 @@ export async function POST(
       pPortion = totalAmount - iPortion;
     }
 
-    const paymentNo = `PAY-2026-${Date.now().toString().slice(-6)}`;
+    const paymentNo = await getNextReceiptNumber();
 
     // Parse collection date (defaults to current time if not provided)
     let paymentDate = new Date();

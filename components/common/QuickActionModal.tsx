@@ -18,16 +18,18 @@ import { useLanguage } from "@/context/LanguageContext";
 export function QuickActionModal({
   isOpen,
   onClose,
+  isAdmin = false,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const { t } = useLanguage();
 
   if (!isOpen) return null;
 
-  const actions = [
+  const rawActions = [
     {
       title: t.newLoan,
       subtitle: "Issue new loan & set terms",
@@ -42,20 +44,24 @@ export function QuickActionModal({
       bg: "bg-emerald-50 dark:bg-emerald-950/30",
       href: "/daily-collections",
     },
-    {
-      title: t.addInvestment,
-      subtitle: "Add partner capital",
-      icon: <TrendingUp className="w-5 h-5 text-indigo-600" />,
-      bg: "bg-indigo-50 dark:bg-indigo-950/30",
-      href: "/partners?action=invest",
-    },
-    {
-      title: t.addWithdrawal,
-      subtitle: "Record partner drawing",
-      icon: <ArrowDownRight className="w-5 h-5 text-rose-600" />,
-      bg: "bg-rose-50 dark:bg-rose-950/30",
-      href: "/partners?action=withdraw",
-    },
+    ...(isAdmin
+      ? [
+          {
+            title: t.addInvestment,
+            subtitle: "Add partner capital",
+            icon: <TrendingUp className="w-5 h-5 text-indigo-600" />,
+            bg: "bg-indigo-50 dark:bg-indigo-950/30",
+            href: "/partners?action=invest",
+          },
+          {
+            title: t.addWithdrawal,
+            subtitle: "Record partner drawing",
+            icon: <ArrowDownRight className="w-5 h-5 text-rose-600" />,
+            bg: "bg-rose-50 dark:bg-rose-950/30",
+            href: "/partners?action=withdraw",
+          },
+        ]
+      : []),
     {
       title: t.addExpense,
       subtitle: "Record office/business expense",
@@ -77,14 +83,20 @@ export function QuickActionModal({
       bg: "bg-blue-50 dark:bg-blue-950/30",
       href: "/customers?action=new",
     },
-    {
-      title: t.newPartner,
-      subtitle: "Add new business partner",
-      icon: <Users className="w-5 h-5 text-teal-600" />,
-      bg: "bg-teal-50 dark:bg-teal-950/30",
-      href: "/partners?action=new",
-    },
+    ...(isAdmin
+      ? [
+          {
+            title: t.newPartner,
+            subtitle: "Add new business partner",
+            icon: <Users className="w-5 h-5 text-teal-600" />,
+            bg: "bg-teal-50 dark:bg-teal-950/30",
+            href: "/partners?action=new",
+          },
+        ]
+      : []),
   ];
+
+  const actions = rawActions;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">

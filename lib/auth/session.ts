@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { PermissionKey } from "./permissions";
 
 const JWT_SECRET = process.env.JWT_SECRET || "vatti-private-secret-key-2026";
@@ -38,7 +38,14 @@ export function verifyToken(token: string): UserSession | null {
 export async function getCurrentUser(): Promise<UserSession | null> {
   try {
     const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
+    let token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token) {
+      const headersList = await headers();
+      const authHeader = headersList.get("authorization");
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.slice(7);
+      }
+    }
     if (!token) return null;
     return verifyToken(token);
   } catch {
@@ -47,20 +54,28 @@ export async function getCurrentUser(): Promise<UserSession | null> {
 }
 
 export async function setSessionCookie(session: UserSession) {
-  const token = signToken(session);
-  const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-  });
+  try {
+    const token = signToken(session);
+    const cookieStore = await cookies();
+    cookieStore.set(COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+    });
+  } catch (err) {
+    // In headless or mobile contexts without cookies() support, fail gracefully
+  }
 }
 
 export async function clearSessionCookie() {
-  const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+  try {
+    const cookieStore = await cookies();
+    cookieStore.delete(COOKIE_NAME);
+  } catch (err) {
+    // Graceful fallback
+  }
 }
 
 export async function checkAppLock(): Promise<boolean> {

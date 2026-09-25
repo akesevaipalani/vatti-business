@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Users,
   Plus,
@@ -46,6 +47,7 @@ interface PartnerListItem {
 }
 
 export default function PartnersPage() {
+  const router = useRouter();
   const { t, formatCurrency } = useLanguage();
   const [partners, setPartners] = useState<PartnerListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +96,10 @@ export default function PartnersPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/partners");
+      if (res.status === 401 || res.status === 403) {
+        router.replace("/dashboard");
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setPartners(data.partners || []);
@@ -103,11 +109,22 @@ export default function PartnersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
-    fetchPartners();
-  }, [fetchPartners]);
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.authenticated || data.user?.role !== "ADMIN") {
+          router.replace("/dashboard");
+        } else {
+          fetchPartners();
+        }
+      })
+      .catch(() => {
+        router.replace("/dashboard");
+      });
+  }, [router, fetchPartners]);
 
   const handleCreatePartner = async (e: React.FormEvent) => {
     e.preventDefault();

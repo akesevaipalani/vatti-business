@@ -9,6 +9,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
+import { CollectionReceiptModal } from "@/components/documents/CollectionReceiptModal";
 
 interface PaymentItem {
   id: string;
@@ -30,6 +31,8 @@ export default function CollectionsPage() {
   const [loading, setLoading] = useState(true);
   const [methodFilter, setMethodFilter] = useState("ALL");
   const [search, setSearch] = useState("");
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchPayments = async () => {
@@ -177,7 +180,20 @@ export default function CollectionsPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                 {filtered.map((p) => (
                   <tr key={p.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                    <td className="py-3.5 px-4 font-bold text-indigo-600">{p.paymentNo}</td>
+                    <td className="py-3.5 px-4 font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPaymentId(p.id);
+                          setShowReceiptModal(true);
+                        }}
+                        className="text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1.5 transition text-left"
+                        title="View Official Collection Receipt"
+                      >
+                        <Printer className="w-3.5 h-3.5 opacity-60 hover:opacity-100" />
+                        <span>{p.paymentNo}</span>
+                      </button>
+                    </td>
                     <td className="py-3.5 px-4 font-sans text-slate-600 dark:text-slate-400">
                       {formatDate(p.date)}
                     </td>
@@ -213,6 +229,18 @@ export default function CollectionsPage() {
           </div>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* INSTANT COLLECTION RECEIPT MODAL                                          */}
+      {/* ========================================================================= */}
+      <CollectionReceiptModal
+        isOpen={showReceiptModal}
+        onClose={() => {
+          setShowReceiptModal(false);
+          setSelectedPaymentId(null);
+        }}
+        paymentId={selectedPaymentId}
+      />
     </div>
   );
 }

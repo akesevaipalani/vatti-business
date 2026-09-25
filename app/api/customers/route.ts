@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { syncEvents } from "@/lib/sync/events";
 
 export async function GET(req: Request) {
   try {
@@ -91,6 +92,13 @@ export async function POST(req: Request) {
         performedBy: "Admin",
         details: `Created customer ${name} (${customerCode})`,
       },
+    });
+
+    syncEvents.broadcast("CUSTOMER_CREATED", {
+      id: customer.id,
+      name: customer.name,
+      customerCode: customer.customerCode,
+      mobile: customer.mobile,
     });
 
     return NextResponse.json({ success: true, customer });

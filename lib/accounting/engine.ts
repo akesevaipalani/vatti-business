@@ -209,25 +209,51 @@ export async function postLoanDisbursement(params: {
   loanId: string;
   customerName: string;
   principalAmount: number;
+  customerReceives?: number;
+  advanceInterest?: number;
+  processingFee?: number;
   paymentMethod: string;
 }) {
   const assetAccountCode = params.paymentMethod === "CASH" ? "1010" : "1020";
+  const advInt = Number(params.advanceInterest) || 0;
+  const pFee = Number(params.processingFee) || 0;
+  const cashDisbursed = params.customerReceives !== undefined && params.customerReceives >= 0
+    ? params.customerReceives
+    : Math.max(0, params.principalAmount - advInt - pFee);
 
   if (params.paymentMethod === "CASH") {
     await prisma.cashAccount.update({
       where: { id: "main-cash" },
-      data: { currentBalance: { decrement: params.principalAmount } },
+      data: { currentBalance: { decrement: cashDisbursed } },
+    });
+  }
+
+  const entries: PostingEntry[] = [
+    { accountCode: "1030", entryType: "DEBIT", amount: params.principalAmount }, // Loans Receivable = Face Amount
+    { accountCode: assetAccountCode, entryType: "CREDIT", amount: cashDisbursed }, // Cash out
+  ];
+
+  if (advInt > 0) {
+    entries.push({
+      accountCode: "4010", // Advance Interest Income earned upfront
+      entryType: "CREDIT",
+      amount: advInt,
+    });
+  }
+
+  if (pFee > 0) {
+    entries.push({
+      accountCode: "4030", // Processing Fees & Other Income earned upfront
+      entryType: "CREDIT",
+      amount: pFee,
     });
   }
 
   return await postTransaction({
-    description: `Loan Disbursed to ${params.customerName}`,
+    description: `Loan Disbursed to ${params.customerName}${advInt > 0 ? ` (Adv Int: ₹${advInt})` : ""}`,
     referenceType: "LOAN_GIVEN",
     referenceId: params.loanId,
-    entries: [
-      { accountCode: "1030", entryType: "DEBIT", amount: params.principalAmount }, // Loans Receivable increases
-      { accountCode: assetAccountCode, entryType: "CREDIT", amount: params.principalAmount },
-    ],
+    entries,
   });
 }
 

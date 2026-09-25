@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { calculateLoan } from "@/lib/loans/calculator";
 import { postLoanCollection } from "@/lib/accounting/engine";
+import { syncEvents } from "@/lib/sync/events";
+import { getNextReceiptNumber } from "@/lib/documents/numbering";
 
 export interface InstallmentScheduleItem {
   id: string;
@@ -87,10 +89,16 @@ export async function generateInstallmentsForLoan(loanId: string) {
 
   if (existingCount > 0) return; // Already generated
 
+  const l = loan as any;
   const calc = calculateLoan({
     principal: loan.principalAmount,
+    loanCalculationType: (l.loanCalculationType as "STANDARD" | "ADVANCE_INTEREST" | "INTEREST_PRINCIPAL") || "STANDARD",
     interestRate: loan.interestRate,
     interestType: loan.interestType as "FLAT" | "REDUCING" | "SIMPLE",
+    advanceInterestAmount: l.advanceInterest,
+    customInterestAmount: loan.totalPayable > loan.principalAmount ? (loan.totalPayable - loan.principalAmount) : undefined,
+    customInstallmentAmount: loan.installmentAmount,
+    processingFee: loan.processingFee,
     interestFrequency: loan.interestFrequency as "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY",
     paymentFrequency: loan.paymentFrequency as "DAILY" | "WEEKLY" | "MONTHLY",
     totalInstallments: loan.totalInstallments,
@@ -432,6 +440,10 @@ export async function recordCollectionForInstallment(data: {
     throw new Error("Installment record not found");
   }
 
+  if (installment.status === "COLLECTED" || installment.paidAmount >= installment.installmentAmount) {
+    throw new Error("Installment has already been collected");
+  }
+
   const loan = installment.loan;
 
   // Split allocation
@@ -487,8 +499,8 @@ export async function recordCollectionForInstallment(data: {
     },
   });
 
-  // 3. Create LoanPayment record
-  const paymentNo = `PAY-2026-${Date.now().toString().slice(-6)}`;
+  // 3. Create LoanPayment record with authoritative ABC/RCPT/YYYY/000001 sequence
+  const paymentNo = await getNextReceiptNumber();
   const payment = await prisma.loanPayment.create({
     data: {
       paymentNo,
@@ -523,6 +535,17 @@ export async function recordCollectionForInstallment(data: {
       performedBy: "Admin",
       details: `Collected ₹${amount} from ${installment.customer.name} for Installment #${installment.installmentNumber} of loan ${loan.loanNo}. Scheduled: ${formatDateToYMD(installment.dueDate)}, Actual Collection: ${formatDateToYMD(paymentDate)}, Status: ${newStatus}`,
     },
+  });
+
+  // 6. Broadcast real-time sync event
+  syncEvents.broadcast("COLLECTION_RECORDED", {
+    installmentId: updatedInstallment.id,
+    loanId: loan.id,
+    customerId: loan.customerId,
+    customerName: installment.customer.name,
+    amount,
+    date: paymentDate,
+    status: newStatus,
   });
 
   return { installment: updatedInstallment, payment };

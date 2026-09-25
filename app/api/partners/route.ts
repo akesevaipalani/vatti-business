@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { postPartnerInvestment } from "@/lib/accounting/engine";
+import { getCurrentUser } from "@/lib/auth/session";
 
 export async function GET() {
   try {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden: Admin privileges required" }, { status: 403 });
+    }
+
     const partners = await prisma.partner.findMany({
       include: {
         investments: { orderBy: { date: "desc" } },
@@ -23,6 +29,10 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden: Admin privileges required" }, { status: 403 });
+    }
     const body = await req.json();
     const {
       name,

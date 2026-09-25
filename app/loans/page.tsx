@@ -23,6 +23,11 @@ interface LoanListItem {
   interestRate: number;
   interestFrequency: string;
   interestType: string;
+  loanCalculationType?: string;
+  advanceInterest?: number;
+  disbursedAmount?: number;
+  paymentFrequency?: string;
+  totalInstallments?: number;
   status: string;
   customer: {
     id: string;
@@ -216,10 +221,32 @@ export default function LoansPage() {
                       <div className="text-[10px] text-slate-400">{loan.customer?.mobile}</div>
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400">
-                      <span className="font-bold text-slate-800 dark:text-slate-200">
-                        {loan.interestRate}% {loan.interestFrequency.toLowerCase()}
-                      </span>
-                      <div className="text-[10px] text-slate-400">{loan.interestType}</div>
+                      {loan.loanCalculationType === "ADVANCE_INTEREST" ? (
+                        <div>
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] border border-emerald-200 dark:border-emerald-800">
+                            Advance Interest
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            Adv Int: {formatCurrency(loan.advanceInterest || 0)}
+                          </div>
+                        </div>
+                      ) : loan.loanCalculationType === "INTEREST_PRINCIPAL" ? (
+                        <div>
+                          <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-bold text-[10px] border border-blue-200 dark:border-blue-800">
+                            Interest + Principal
+                          </span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {loan.paymentFrequency || "Monthly"}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="font-bold text-slate-800 dark:text-slate-200">
+                            {loan.interestRate}% {loan.interestFrequency.toLowerCase()}
+                          </span>
+                          <div className="text-[10px] text-slate-400">{loan.interestType}</div>
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
                       {formatCurrency(loan.principalAmount)}

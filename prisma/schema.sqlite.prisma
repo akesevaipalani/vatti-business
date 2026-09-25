@@ -199,6 +199,9 @@ model Loan {
   customer             Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
   date                 DateTime             @default(now())
   principalAmount      Float
+  loanCalculationType  String               @default("STANDARD") // STANDARD, ADVANCE_INTEREST, INTEREST_PRINCIPAL
+  advanceInterest      Float                @default(0)
+  disbursedAmount      Float                @default(0)
   interestType         String               @default("FLAT") // FLAT, REDUCING, SIMPLE, MANUAL
   interestRate         Float                // Percentage per frequency or per annum
   interestFrequency    String               @default("MONTHLY") // DAILY, WEEKLY, MONTHLY, YEARLY

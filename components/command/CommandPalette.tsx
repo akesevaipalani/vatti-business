@@ -16,9 +16,11 @@ interface SearchResult {
 export function CommandPalette({
   isOpen,
   onClose,
+  isAdmin = false,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  isAdmin?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -52,8 +54,8 @@ export function CommandPalette({
       setResults([
         { id: "p1", title: t.dailyCollections, subtitle: "Quick record daily payments", category: "page", url: "/daily-collections" },
         { id: "p2", title: t.newLoan, subtitle: "Issue a new loan to customer", category: "page", url: "/loans/new" },
-        { id: "p3", title: t.partners, subtitle: "Manage partners and investments", category: "page", url: "/partners" },
-        { id: "p4", title: t.dayClosing, subtitle: "Reconcile daily cash and lock day", category: "page", url: "/day-closing" },
+        ...(isAdmin ? [{ id: "p3", title: t.partners, subtitle: "Manage partners and investments", category: "page", url: "/partners" } as SearchResult] : []),
+        ...(isAdmin ? [{ id: "p4", title: t.dayClosing, subtitle: "Reconcile daily cash and lock day", category: "page", url: "/day-closing" } as SearchResult] : []),
         { id: "p5", title: t.reports, subtitle: "P&L, Balance Sheet, Ledgers", category: "page", url: "/reports" },
       ]);
       return;

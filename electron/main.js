@@ -30,12 +30,24 @@ function getAppDataPaths() {
     fs.mkdirSync(backupsDir, { recursive: true });
   }
 
+  // Permanent Production Cloud Authority URL
+  const PRODUCTION_CLOUD_URL = 'https://vatti-business-production.up.railway.app';
+
+  // Priority order:
+  // 1. Explicit CENTRAL_SERVER_URL environment variable
+  // 2. Existing cloud-config.json value
+  // 3. Permanent Railway production cloud fallback
   let centralServerUrl = process.env.CENTRAL_SERVER_URL || '';
   if (!centralServerUrl && fs.existsSync(configFile)) {
     try {
       const conf = JSON.parse(fs.readFileSync(configFile, 'utf8'));
       if (conf.centralServerUrl) centralServerUrl = conf.centralServerUrl;
     } catch {}
+  }
+
+  // Default to authoritative production cloud server if not overridden
+  if (!centralServerUrl && process.env.VATTI_FORCE_LOCAL_SQLITE !== 'true') {
+    centralServerUrl = PRODUCTION_CLOUD_URL;
   }
 
   return { userDataDir, dbPath, backupsDir, centralServerUrl };

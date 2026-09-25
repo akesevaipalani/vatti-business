@@ -53,9 +53,41 @@ scratch/
 win-unpacked/
 
 # Logs
-*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Partner Android client ignored artifacts
+partner-android/node_modules/
+partner-android/.expo/
+partner-android/dist/
+partner-android/build/
+partner-android/.gradle/
+partner-android/android/.gradle/
+partner-android/android/app/build/
+partner-android/android/build/
+partner-android/ios/Pods/
+partner-android/.env
+partner-android/.env.*
+partner-android/*.apk
+
+# Admin Android client ignored artifacts
+admin-android/node_modules/
+admin-android/.expo/
+admin-android/dist/
+admin-android/build/
+admin-android/.gradle/
+admin-android/android/.gradle/
+admin-android/android/app/build/
+admin-android/android/build/
+admin-android/ios/Pods/
+admin-android/.env
+admin-android/.env.*
+admin-android/*.apk
+
+# Release APKs and Credentials
+CREDENTIALS/
+APK RELEASES/
+*.apk
+phase7_prompt*.txt
 

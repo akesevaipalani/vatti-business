@@ -142,7 +142,7 @@ export async function getDashboardFinancialStats() {
 
   return {
     kpis: {
-      totalCapital: totalPartnerCapital + (cashAccount?.openingBalance || 0) + totalBusinessProfit,
+      totalCapital: totalPartnerCapital + totalBusinessProfit,
       totalPartnerInvestment,
       totalPartnerCapital,
       totalPartnerWithdrawal,

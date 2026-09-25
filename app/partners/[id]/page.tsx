@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, use, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Printer,
@@ -70,6 +71,7 @@ export default function PartnerDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const router = useRouter();
   const { id } = use(params);
   const { formatCurrency, formatDate } = useLanguage();
   const [partner, setPartner] = useState<PartnerDetail | null>(null);
@@ -80,6 +82,10 @@ export default function PartnerDetailPage({
     setLoading(true);
     try {
       const res = await fetch(`/api/partners/${id}`);
+      if (res.status === 401 || res.status === 403) {
+        router.replace("/dashboard");
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         setPartner(data.partner);
@@ -89,11 +95,22 @@ export default function PartnerDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, router]);
 
   useEffect(() => {
-    fetchPartner();
-  }, [fetchPartner]);
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.authenticated || data.user?.role !== "ADMIN") {
+          router.replace("/dashboard");
+        } else {
+          fetchPartner();
+        }
+      })
+      .catch(() => {
+        router.replace("/dashboard");
+      });
+  }, [router, fetchPartner]);
 
   const handleGenerateSettlement = async () => {
     if (!confirm("Are you sure you want to generate an official settlement statement?")) return;

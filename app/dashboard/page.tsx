@@ -82,6 +82,18 @@ export default function DashboardPage() {
   const { t, formatCurrency, formatDate } = useLanguage();
   const [stats, setStats] = useState<DashboardStatsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.user?.role === "ADMIN") {
+          setIsAdmin(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
@@ -125,7 +137,7 @@ export default function DashboardPage() {
       color: "text-indigo-600",
       bg: "bg-indigo-50 dark:bg-indigo-950/40",
       sub: "Owner + Partner Equity",
-      href: "/partners",
+      href: isAdmin ? "/partners" : "/dashboard",
     },
     {
       title: t.totalPartnerInvestment,
@@ -134,7 +146,7 @@ export default function DashboardPage() {
       color: "text-teal-600",
       bg: "bg-teal-50 dark:bg-teal-950/40",
       sub: `Current Cap: ${formatCurrency(k.totalPartnerCapital)}`,
-      href: "/partners",
+      href: isAdmin ? "/partners" : "/dashboard",
     },
     {
       title: t.totalMoneyGiven,
@@ -197,7 +209,7 @@ export default function DashboardPage() {
       color: "text-purple-600",
       bg: "bg-purple-50 dark:bg-purple-950/40",
       sub: "Allocated to Partners",
-      href: "/partners",
+      href: isAdmin ? "/partners" : "/dashboard",
     },
     {
       title: t.totalBusinessAssets,

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth/session";
 
 export interface SearchResult {
   id: string;
@@ -18,39 +19,44 @@ export async function GET(req: Request) {
       return NextResponse.json({ results: [] });
     }
 
-    const [customers, loans, partners] = await Promise.all([
-      prisma.customer.findMany({
-        where: {
-          OR: [
-            { name: { contains: q } },
-            { mobile: { contains: q } },
-            { customerCode: { contains: q } },
-            { city: { contains: q } },
-          ],
-        },
-        take: 5,
-      }),
-      prisma.loan.findMany({
-        where: {
-          OR: [
-            { loanNo: { contains: q } },
-            { customer: { name: { contains: q } } },
-          ],
-        },
-        include: { customer: { select: { name: true } } },
-        take: 5,
-      }),
-      prisma.partner.findMany({
-        where: {
-          OR: [
-            { name: { contains: q } },
-            { mobile: { contains: q } },
-            { partnerCode: { contains: q } },
-          ],
-        },
-        take: 5,
-      }),
-    ]);
+    const user = await getCurrentUser();
+    const isAdmin = user?.role === "ADMIN";
+
+    const customers = await prisma.customer.findMany({
+      where: {
+        OR: [
+          { name: { contains: q } },
+          { mobile: { contains: q } },
+          { customerCode: { contains: q } },
+          { city: { contains: q } },
+        ],
+      },
+      take: 5,
+    });
+
+    const loans = await prisma.loan.findMany({
+      where: {
+        OR: [
+          { loanNo: { contains: q } },
+          { customer: { name: { contains: q } } },
+        ],
+      },
+      include: { customer: { select: { name: true } } },
+      take: 5,
+    });
+
+    const partners = isAdmin
+      ? await prisma.partner.findMany({
+          where: {
+            OR: [
+              { name: { contains: q } },
+              { mobile: { contains: q } },
+              { partnerCode: { contains: q } },
+            ],
+          },
+          take: 5,
+        })
+      : [];
 
     const results: SearchResult[] = [];
 
@@ -74,15 +80,17 @@ export async function GET(req: Request) {
       });
     });
 
-    partners.forEach((p) => {
-      results.push({
-        id: `p-${p.id}`,
-        title: p.name,
-        subtitle: `Partner • Capital: ₹${p.currentCapital.toLocaleString("en-IN")} • Share: ${p.profitSharePercent}%`,
-        category: "partner",
-        url: `/partners/${p.id}`,
+    if (isAdmin) {
+      partners.forEach((p) => {
+        results.push({
+          id: `p-${p.id}`,
+          title: p.name,
+          subtitle: `Partner • Capital: ₹${p.currentCapital.toLocaleString("en-IN")} • Share: ${p.profitSharePercent}%`,
+          category: "partner",
+          url: `/partners/${p.id}`,
+        });
       });
-    });
+    }
 
     return NextResponse.json({ results });
   } catch (error: unknown) {

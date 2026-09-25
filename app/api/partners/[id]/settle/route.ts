@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth/session";
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await getCurrentUser();
+    if (!user || user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Forbidden: Admin privileges required" }, { status: 403 });
+    }
+
     const { id } = await params;
     const body = await req.json();
     const { notes, paymentMethod, referenceNo } = body;

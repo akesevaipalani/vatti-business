@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateLoan } from "@/lib/loans/calculator";
 import { postLoanDisbursement } from "@/lib/accounting/engine";
 import { generateInstallmentsForLoan } from "@/lib/loans/installments";
+import { getNextLoanNumber } from "@/lib/documents/numbering";
 import { Prisma } from "@prisma/client";
 
 export async function GET(req: Request) {
@@ -45,8 +46,14 @@ export async function POST(req: Request) {
     const {
       customerId,
       principalAmount,
+      loanCalculationType,
       interestType,
       interestRate,
+      advanceInterestAmount,
+      customInterestAmount,
+      principalPerInstallment,
+      interestPerInstallment,
+      customInstallmentAmount,
       interestFrequency,
       paymentFrequency,
       totalInstallments,
@@ -72,19 +79,27 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Customer not found" }, { status: 404 });
     }
 
+    const calculationType = (loanCalculationType as "STANDARD" | "ADVANCE_INTEREST" | "INTEREST_PRINCIPAL") || "STANDARD";
+
     // Run accurate loan calculation
     const calc = calculateLoan({
       principal,
+      loanCalculationType: calculationType,
       interestRate: Number(interestRate) || 0,
       interestType: interestType || "FLAT",
+      advanceInterestAmount: advanceInterestAmount !== undefined && advanceInterestAmount !== null ? Number(advanceInterestAmount) : undefined,
+      customInterestAmount: customInterestAmount !== undefined && customInterestAmount !== null ? Number(customInterestAmount) : undefined,
+      principalPerInstallment: principalPerInstallment !== undefined && principalPerInstallment !== null ? Number(principalPerInstallment) : undefined,
+      interestPerInstallment: interestPerInstallment !== undefined && interestPerInstallment !== null ? Number(interestPerInstallment) : undefined,
+      customInstallmentAmount: customInstallmentAmount !== undefined && customInstallmentAmount !== null ? Number(customInstallmentAmount) : undefined,
+      processingFee: Number(processingFee) || 0,
       interestFrequency: interestFrequency || "MONTHLY",
       paymentFrequency: paymentFrequency || "MONTHLY",
       totalInstallments: Number(totalInstallments) || 12,
       startDate: startDate ? new Date(startDate) : new Date(),
     });
 
-    const count = await prisma.loan.count();
-    const loanNo = `LN-2026-${String(count + 1).padStart(3, "0")}`;
+    const loanNo = await getNextLoanNumber();
 
     // Compute due date from schedule
     const lastItem = calc.schedule[calc.schedule.length - 1];
@@ -96,20 +111,23 @@ export async function POST(req: Request) {
         loanNo,
         customerId,
         principalAmount: principal,
+        loanCalculationType: calculationType,
+        advanceInterest: calc.advanceInterest,
+        disbursedAmount: calc.customerReceives,
         interestType: interestType || "FLAT",
         interestRate: Number(interestRate) || 0,
         interestFrequency: interestFrequency || "MONTHLY",
         paymentFrequency: paymentFrequency || "MONTHLY",
-        totalInstallments: Number(totalInstallments) || 12,
+        totalInstallments: calc.totalInstallments,
         installmentAmount: calc.installmentAmount,
         processingFee: Number(processingFee) || 0,
         totalPayable: calc.totalPayable,
         principalOutstanding: principal,
-        interestOutstanding: calc.totalInterest,
+        interestOutstanding: calculationType === "ADVANCE_INTEREST" ? 0 : calc.totalInterest,
         dueDate,
         status: "ACTIVE",
         notes,
-      },
+      } as any,
     });
 
     // 1b. Generate scheduled installments in database
@@ -141,11 +159,14 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. Double-entry posting: Cash/Bank reduces, Loans Receivable increases
+    // 4. Double-entry posting: Cash/Bank reduces, Loans Receivable increases, Advance Interest / Fees credited if applicable
     await postLoanDisbursement({
       loanId: loan.id,
       customerName: customer.name,
       principalAmount: principal,
+      customerReceives: calc.customerReceives,
+      advanceInterest: calc.advanceInterest,
+      processingFee: Number(processingFee) || 0,
       paymentMethod: paymentMethod || "CASH",
     });
 

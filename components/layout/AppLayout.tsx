@@ -126,12 +126,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  const isAdmin = currentUser?.role === "ADMIN";
+
   const navSections = [
     {
-      title: "Lending & Partners",
+      title: isAdmin ? "Lending & Partners" : "Lending & Operations",
       items: [
         { label: t.dashboard, href: "/dashboard", icon: LayoutDashboard },
-        { label: t.partners, href: "/partners", icon: Users },
+        ...(isAdmin ? [{ label: t.partners, href: "/partners", icon: Users }] : []),
         { label: t.loansGiven, href: "/loans", icon: CreditCard },
         { label: t.dailyCollections, href: "/daily-collections", icon: CheckCircle2, highlight: true },
         { label: t.collections, href: "/collections", icon: WalletCards },
@@ -153,25 +155,40 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       title: "Accounting & Reports",
       items: [
         { label: t.accountingLedger, href: "/accounting/ledger", icon: BookOpen },
-        { label: t.dayClosing, href: "/day-closing", icon: Clock },
+        ...(isAdmin ? [{ label: t.dayClosing, href: "/day-closing", icon: Clock }] : []),
         { label: t.reports, href: "/reports", icon: BarChart3 },
       ],
     },
-    {
-      title: "Administration",
-      items: [
-        { label: t.auditLog, href: "/audit-log", icon: ShieldAlert },
-        { label: t.backupRestore, href: "/backup", icon: Database },
-        { label: t.settings, href: "/settings", icon: Settings },
-      ],
-    },
+    ...(isAdmin
+      ? [
+          {
+            title: "Administration",
+            items: [
+              { label: t.auditLog, href: "/audit-log", icon: ShieldAlert },
+              { label: t.backupRestore, href: "/backup", icon: Database },
+              { label: t.settings, href: "/settings", icon: Settings },
+            ],
+          },
+        ]
+      : [
+          {
+            title: "Account",
+            items: [
+              {
+                label: lang === "ta" ? "சுயவிவரம் & கடவுச்சொல்" : "Profile & Security",
+                href: "/settings",
+                icon: Settings,
+              },
+            ],
+          },
+        ]),
   ];
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
       {/* Modals */}
-      <CommandPalette isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
-      <QuickActionModal isOpen={quickActionOpen} onClose={() => setQuickActionOpen(false)} />
+      <CommandPalette isOpen={searchOpen} onClose={() => setSearchOpen(false)} isAdmin={isAdmin} />
+      <QuickActionModal isOpen={quickActionOpen} onClose={() => setQuickActionOpen(false)} isAdmin={isAdmin} />
       <LockScreenModal isLocked={isLocked} onUnlock={handleUnlock} />
 
       {/* MOBILE DRAWER (SLIDE-OVER) */}
@@ -349,11 +366,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
             {/* User Badge / Device Indicator */}
             {currentUser && (
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/50 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-300 text-xs font-medium">
+              <Link
+                href="/settings"
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/50 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-300 text-xs font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition cursor-pointer"
+                title={lang === "ta" ? "சுயவிவரம் மற்றும் அமைப்புகள்" : "Profile & Settings"}
+              >
                 <span className="w-2 h-2 rounded-full bg-indigo-600" />
                 <span className="max-w-[100px] sm:max-w-none truncate">{currentUser.name}</span>
                 <span className="text-[10px] uppercase font-bold text-indigo-500">[{currentUser.role}]</span>
-              </div>
+              </Link>
             )}
 
             {/* Sync Status Badge */}

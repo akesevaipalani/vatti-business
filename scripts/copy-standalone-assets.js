@@ -55,7 +55,14 @@ if (fs.existsSync(publicSrc)) {
   console.log(`[standalone-assets] Synced public/ -> ${publicDest}`);
 }
 
-// 3. Ensure Prisma Windows Query Engine
+// 3. Ensure Prisma Client and Windows Query Engine
+const clientSrc = path.join(rootDir, 'node_modules', '.prisma', 'client');
+const clientDest = path.join(standaloneDir, 'node_modules', '.prisma', 'client');
+if (fs.existsSync(clientSrc)) {
+  copyFolderSync(clientSrc, clientDest);
+  console.log(`[standalone-assets] Synced .prisma/client -> ${clientDest}`);
+}
+
 const engineSrc = path.join(rootDir, 'node_modules', '.prisma', 'client', 'query_engine-windows.dll.node');
 const engineDest = path.join(standaloneDir, 'node_modules', '.prisma', 'client', 'query_engine-windows.dll.node');
 if (fs.existsSync(engineSrc)) {
@@ -63,11 +70,16 @@ if (fs.existsSync(engineSrc)) {
   console.log(`[standalone-assets] Verified query_engine-windows.dll.node in standalone`);
 }
 
-// 4. Copy Prisma schema
-const schemaSrc = path.join(rootDir, 'prisma', 'schema.prisma');
+// 4. Copy Prisma schema (enforce SQLite for standalone runtime)
+const sqliteSchemaPath = path.join(rootDir, 'prisma', 'schema.sqlite.prisma');
+const schemaSrc = fs.existsSync(sqliteSchemaPath) ? sqliteSchemaPath : path.join(rootDir, 'prisma', 'schema.prisma');
 const schemaDest = path.join(standaloneDir, 'prisma', 'schema.prisma');
 safeCopyFile(schemaSrc, schemaDest);
-console.log(`[standalone-assets] Synced schema.prisma in standalone`);
+console.log(`[standalone-assets] Synced SQLite schema.prisma in standalone`);
+
+const clientSchemaDest = path.join(standaloneDir, 'node_modules', '.prisma', 'client', 'schema.prisma');
+safeCopyFile(schemaSrc, clientSchemaDest);
+console.log(`[standalone-assets] Synced SQLite schema.prisma into .prisma/client`);
 
 // 5. Copy pristine template DB if exists
 const dbSrc = path.join(rootDir, 'prisma', 'vatti.db');
@@ -87,6 +99,22 @@ if (fs.existsSync(standaloneServerPath)) {
   );
   fs.writeFileSync(standaloneServerPath, content);
   console.log('[standalone-assets] Ensured standalone server binds to 0.0.0.0 on container hosts');
+}
+
+// 7. Sanitize standalone .env to prevent any PostgreSQL DATABASE_URL leakage
+const standaloneEnvPath = path.join(standaloneDir, '.env');
+if (fs.existsSync(standaloneEnvPath)) {
+  let lines = fs.readFileSync(standaloneEnvPath, 'utf-8').split(/\r?\n/);
+  lines = lines.filter((line) => !line.trim().startsWith('DATABASE_URL='));
+  fs.writeFileSync(standaloneEnvPath, lines.join('\n'));
+  console.log('[standalone-assets] Sanitized .next/standalone/.env (stripped DATABASE_URL for local SQLite isolation)');
+}
+
+// 8. Remove any unwanted backups directory from standalone
+const standaloneBackupsDir = path.join(standaloneDir, 'backups');
+if (fs.existsSync(standaloneBackupsDir)) {
+  fs.rmSync(standaloneBackupsDir, { recursive: true, force: true });
+  console.log('[standalone-assets] Removed extraneous backups directory from standalone bundle');
 }
 
 console.log('[standalone-assets] Assets successfully synced to standalone runtime.\n');

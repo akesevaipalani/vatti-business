@@ -74,6 +74,7 @@ export async function generateProfitAndLossReport(startDate?: Date, endDate?: Da
 export async function generateBalanceSheetReport() {
   const [
     cashAccount,
+    ledgerCashAccount,
     bankAccounts,
     activeLoans,
     assets,
@@ -82,6 +83,7 @@ export async function generateBalanceSheetReport() {
     partners,
   ] = await Promise.all([
     prisma.cashAccount.findUnique({ where: { id: "main-cash" } }),
+    prisma.ledgerAccount.findUnique({ where: { code: "1010" } }),
     prisma.bankAccount.findMany(),
     prisma.loan.findMany({ where: { status: { in: ["ACTIVE", "OVERDUE"] } } }),
     prisma.asset.findMany({ where: { status: "ACTIVE" } }),
@@ -90,7 +92,8 @@ export async function generateBalanceSheetReport() {
     prisma.partner.findMany({ where: { status: "ACTIVE" } }),
   ]);
 
-  const cashInHand = cashAccount?.currentBalance || 0;
+  // Authoritative Cash-in-Hand from General Ledger (code 1010), falling back to cashAccount
+  const cashInHand = ledgerCashAccount ? ledgerCashAccount.balance : (cashAccount?.currentBalance || 0);
   const bankTotal = bankAccounts.reduce((sum, b) => sum + b.currentBalance, 0);
   const loansReceivable = activeLoans.reduce((sum, l) => sum + l.principalOutstanding, 0);
   const interestReceivable = activeLoans.reduce((sum, l) => sum + l.interestOutstanding, 0);
@@ -128,7 +131,7 @@ export async function generateBalanceSheetReport() {
       retainedProfit,
       totalCapital,
     },
-    isBalanced: Math.abs(totalAssets - (totalLiabilities + totalCapital)) < 100,
+    isBalanced: Math.abs(totalAssets - (totalLiabilities + totalCapital)) < 1,
     difference: totalAssets - (totalLiabilities + totalCapital),
   };
 }
@@ -140,7 +143,7 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
   };
   const hasDateFilter = startDate || endDate;
 
-  const [cashPayments, cashIncomes, cashInvestments, cashLoans, cashExpenses, cashWithdrawals, cashAccount] =
+  const [cashPayments, cashIncomes, cashInvestments, cashLoans, cashExpenses, cashWithdrawals, cashAccount, ledgerCashAccount] =
     await Promise.all([
       prisma.loanPayment.findMany({
         where: {
@@ -176,6 +179,7 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
         },
       }),
       prisma.cashAccount.findUnique({ where: { id: "main-cash" } }),
+      prisma.ledgerAccount.findUnique({ where: { code: "1010" } }),
     ]);
 
   const collectionsIn = cashPayments.reduce((s, p) => s + p.amount, 0);
@@ -189,6 +193,7 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
   const totalOutflows = expensesOut + withdrawalsOut + loansDisbursedOut;
 
   const netCashFlow = totalInflows - totalOutflows;
+  const currentCashBalance = ledgerCashAccount ? ledgerCashAccount.balance : (cashAccount?.currentBalance || 0);
 
   return {
     inflows: {
@@ -204,6 +209,6 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
       totalOutflows,
     },
     netCashFlow,
-    currentCashBalance: cashAccount?.currentBalance || 0,
+    currentCashBalance,
   };
 }

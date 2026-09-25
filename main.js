@@ -21,6 +21,7 @@ function getAppDataPaths() {
   const userDataDir = path.join(appData, 'VATTI BUSINESS');
   const dbPath = path.join(userDataDir, 'vatti.db');
   const backupsDir = path.join(userDataDir, 'backups');
+  const configFile = path.join(userDataDir, 'cloud-config.json');
 
   if (!fs.existsSync(userDataDir)) {
     fs.mkdirSync(userDataDir, { recursive: true });
@@ -29,7 +30,27 @@ function getAppDataPaths() {
     fs.mkdirSync(backupsDir, { recursive: true });
   }
 
-  return { userDataDir, dbPath, backupsDir };
+  // Permanent Production Cloud Authority URL
+  const PRODUCTION_CLOUD_URL = 'https://vatti-business-production.up.railway.app';
+
+  // Priority order:
+  // 1. Explicit CENTRAL_SERVER_URL environment variable
+  // 2. Existing cloud-config.json value
+  // 3. Permanent Railway production cloud fallback
+  let centralServerUrl = process.env.CENTRAL_SERVER_URL || '';
+  if (!centralServerUrl && fs.existsSync(configFile)) {
+    try {
+      const conf = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      if (conf.centralServerUrl) centralServerUrl = conf.centralServerUrl;
+    } catch {}
+  }
+
+  // Default to authoritative production cloud server if not overridden
+  if (!centralServerUrl && process.env.VATTI_FORCE_LOCAL_SQLITE !== 'true') {
+    centralServerUrl = PRODUCTION_CLOUD_URL;
+  }
+
+  return { userDataDir, dbPath, backupsDir, centralServerUrl };
 }
 
 // Ensure initial database is safely placed in %APPDATA% without overwriting existing data
@@ -162,7 +183,7 @@ function startNextServer(port, dbPath, backupsDir) {
 }
 
 // Create the main desktop application window
-function createMainWindow(port) {
+function createMainWindow(port, customUrl) {
   const iconPath = app.isPackaged
     ? path.join(process.resourcesPath, 'icon.ico')
     : path.resolve(__dirname, '..', 'build', 'icon.ico');
@@ -186,7 +207,9 @@ function createMainWindow(port) {
 
   mainWindow.setMenuBarVisibility(false);
 
-  mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  const targetUrl = customUrl || `http://127.0.0.1:${port}`;
+  console.log(`[VATTI] Loading window URL: ${targetUrl}`);
+  mainWindow.loadURL(targetUrl);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -217,21 +240,26 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   try {
-    const { userDataDir, dbPath, backupsDir } = getAppDataPaths();
+    const { userDataDir, dbPath, backupsDir, centralServerUrl } = getAppDataPaths();
     console.log(`[VATTI] User data directory: ${userDataDir}`);
 
-    ensureInitialDatabase(dbPath);
+    if (centralServerUrl) {
+      console.log(`[VATTI] Connecting Desktop to Central Cloud Server: ${centralServerUrl}`);
+      createMainWindow(null, centralServerUrl);
+    } else {
+      ensureInitialDatabase(dbPath);
 
-    activePort = await findAvailablePort(3000);
-    console.log(`[VATTI] Allocated port: ${activePort}`);
+      activePort = await findAvailablePort(3000);
+      console.log(`[VATTI] Allocated port: ${activePort}`);
 
-    startNextServer(activePort, dbPath, backupsDir);
+      startNextServer(activePort, dbPath, backupsDir);
 
-    console.log('[VATTI] Waiting for internal server ready...');
-    await waitForServer(activePort, 30000);
-    console.log('[VATTI] Internal server is ready!');
+      console.log('[VATTI] Waiting for internal server ready...');
+      await waitForServer(activePort, 30000);
+      console.log('[VATTI] Internal server is ready!');
 
-    createMainWindow(activePort);
+      createMainWindow(activePort);
+    }
   } catch (err) {
     console.error('[VATTI FATAL]', err);
     const { dialog } = require('electron');

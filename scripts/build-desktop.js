@@ -29,6 +29,13 @@ async function buildDesktop() {
   const rootDir = path.resolve(__dirname, '..');
   const standaloneDir = path.join(rootDir, '.next', 'standalone');
 
+  // 0. Safeguard existing build EXEs before new compilation
+  console.log('[0/5] Backing up previous executables for safety...');
+  const backupScript = path.join(rootDir, 'scripts', 'backup-previous-exes.js');
+  if (fs.existsSync(backupScript)) {
+    run('node scripts/backup-previous-exes.js');
+  }
+
   // 1. Ensure icon is generated
   const iconPath = path.join(rootDir, 'build', 'icon.ico');
   if (!fs.existsSync(iconPath)) {
@@ -38,12 +45,22 @@ async function buildDesktop() {
     console.log('[1/5] Application icon verified at build/icon.ico');
   }
 
-  // 2. Build Next.js in standalone mode
-  console.log('\n[2/5] Compiling Next.js Standalone bundle...');
+  // 2. Ensure SQLite schema and generate SQLite Prisma client for Desktop
+  console.log('\n[2/5] Configuring SQLite Prisma engine for Desktop offline architecture...');
+  const sqliteSchema = path.join(rootDir, 'prisma', 'schema.sqlite.prisma');
+  const activeSchema = path.join(rootDir, 'prisma', 'schema.prisma');
+  if (fs.existsSync(sqliteSchema)) {
+    fs.copyFileSync(sqliteSchema, activeSchema);
+    console.log('Synchronized prisma/schema.prisma from prisma/schema.sqlite.prisma (provider: sqlite)');
+  }
+  run('npx prisma generate');
+
+  // 3. Build Next.js in standalone mode
+  console.log('\n[3/5] Compiling Next.js Standalone bundle...');
   run('npm run build');
 
-  // 3. Copy static assets to standalone
-  console.log('\n[3/5] Copying static assets to standalone bundle...');
+  // 4. Copy static assets to standalone
+  console.log('\n[4/5] Copying static assets and Prisma client to standalone bundle...');
   const staticSrc = path.join(rootDir, '.next', 'static');
   const staticDest = path.join(standaloneDir, '.next', 'static');
   copyFolderSync(staticSrc, staticDest);
@@ -56,11 +73,12 @@ async function buildDesktop() {
     console.log(`Copied public/ to ${publicDest}`);
   }
 
-  // 4. Ensure Prisma client and Windows query engine are inside standalone
-  console.log('\n[4/5] Verifying Prisma query engine in standalone bundle...');
+  // Ensure entire SQLite Prisma client is copied into standalone
+  const clientSrcDir = path.join(rootDir, 'node_modules', '.prisma', 'client');
   const prismaDestDir = path.join(standaloneDir, 'node_modules', '.prisma', 'client');
-  if (!fs.existsSync(prismaDestDir)) {
-    fs.mkdirSync(prismaDestDir, { recursive: true });
+  if (fs.existsSync(clientSrcDir)) {
+    copyFolderSync(clientSrcDir, prismaDestDir);
+    console.log('Synced SQLite Prisma Client into standalone bundle');
   }
 
   const engineSrc = path.join(rootDir, 'node_modules', '.prisma', 'client', 'query_engine-windows.dll.node');
@@ -78,12 +96,24 @@ async function buildDesktop() {
     fs.mkdirSync(schemaDestDir, { recursive: true });
   }
   fs.copyFileSync(
-    path.join(rootDir, 'prisma', 'schema.prisma'),
+    path.join(rootDir, 'prisma', 'schema.sqlite.prisma'),
     path.join(schemaDestDir, 'schema.prisma')
   );
 
+  // Copy vatti.db template into standalone/prisma if available
+  const templateDbSrc = path.join(rootDir, 'prisma', 'vatti.db');
+  const templateDbDest = path.join(schemaDestDir, 'vatti.db');
+  if (fs.existsSync(templateDbSrc)) {
+    fs.copyFileSync(templateDbSrc, templateDbDest);
+    console.log('Synced pristine template vatti.db to standalone/prisma/vatti.db');
+  }
+
   // 5. Package with electron-builder
   console.log('\n[5/5] Packaging Windows Desktop Installer & Portable executable via electron-builder...');
+  const stale7z = path.join(rootDir, 'dist', 'vatti-business-1.0.0-x64.nsis.7z');
+  if (fs.existsSync(stale7z)) {
+    try { fs.unlinkSync(stale7z); } catch {}
+  }
   run('npx electron-builder --win');
 
   console.log('\n========================================================================');

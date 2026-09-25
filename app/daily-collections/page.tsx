@@ -21,6 +21,7 @@ import {
 import { useLanguage } from "@/context/LanguageContext";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { CollectionReceiptModal, ReceiptData } from "@/components/documents/CollectionReceiptModal";
 
 interface TodayItem {
   id: string;
@@ -135,6 +136,11 @@ export default function CollectionManagementPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  // Instant Collection Receipt Modal State
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null);
+  const [receiptInitialData, setReceiptInitialData] = useState<Partial<ReceiptData> | null>(null);
 
   // Business Name for PDF and Print
   const [businessName, setBusinessName] = useState("VATTI BUSINESS");
@@ -261,14 +267,40 @@ export default function CollectionManagementPage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setSuccessMsg("Collection recorded successfully!");
-        setTimeout(() => {
-          setCollectTarget(null);
-          if (activeTab === "today") {
-            fetchTodayList(selectedDate);
-          } else {
-            fetchPendingList(selectedDate);
-          }
-        }, 600);
+        const paymentId = data.payment?.id || null;
+        const initialReceipt: Partial<ReceiptData> | null = data.payment
+          ? {
+              receiptNo: data.payment.paymentNo,
+              loanNo: collectTarget.loanNo,
+              collectionDate: data.payment.date || collectionDate,
+              actualPaymentDate: data.payment.date || new Date(),
+              installmentNumber: collectTarget.installmentNumber,
+              customer: {
+                name: collectTarget.customerName,
+                mobile: collectTarget.mobile,
+                address: collectTarget.address,
+              },
+              totalAmountPaid: data.payment.amount,
+              principalPaid: data.payment.principalPortion,
+              interestPaid: data.payment.interestPortion,
+              paymentMethod: data.payment.paymentMethod || paymentMethod,
+            }
+          : null;
+
+        // Dismiss collection input form
+        setCollectTarget(null);
+
+        // Open Instant Collection Receipt Modal immediately
+        setReceiptPaymentId(paymentId);
+        setReceiptInitialData(initialReceipt);
+        setShowReceiptModal(true);
+
+        // Refresh underlying collection schedule table
+        if (activeTab === "today") {
+          fetchTodayList(selectedDate);
+        } else {
+          fetchPendingList(selectedDate);
+        }
       } else {
         setErrorMsg(data.error || "Failed to record payment");
       }
@@ -1297,6 +1329,59 @@ export default function CollectionManagementPage() {
                 </div>
               </div>
 
+              {/* LIVE COLLECTION BREAKDOWN & OUTSTANDING AFTER PAYMENT */}
+              {collectTarget && (
+                <div className="bg-emerald-50 dark:bg-emerald-950/40 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800 space-y-2">
+                  <div className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
+                    <span>Collection Component Breakdown</span>
+                    <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider">Live Preview</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                    <div className="bg-white dark:bg-slate-800 p-2 rounded border border-emerald-100 dark:border-emerald-900/50">
+                      <span className="text-[10px] text-slate-500 font-sans block">Current Due</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">
+                        {formatCurrency(
+                          "amountToCollect" in collectTarget
+                            ? collectTarget.remainingAmount || collectTarget.amountToCollect
+                            : collectTarget.pendingAmount || collectTarget.expectedAmount
+                        )}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-2 rounded border border-emerald-100 dark:border-emerald-900/50">
+                      <span className="text-[10px] text-slate-500 font-sans block">Total Collection</span>
+                      <span className="font-bold text-emerald-600">
+                        {formatCurrency(Number(amount) || 0)}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-2 rounded border border-emerald-100 dark:border-emerald-900/50">
+                      <span className="text-[10px] text-slate-500 font-sans block">Principal Component</span>
+                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                        {formatCurrency(Number(principalPortion) || 0)}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 p-2 rounded border border-emerald-100 dark:border-emerald-900/50">
+                      <span className="text-[10px] text-slate-500 font-sans block">Interest Component</span>
+                      <span className="font-bold text-amber-600">
+                        {formatCurrency(Number(interestPortion) || 0)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-1.5 border-t border-emerald-200 dark:border-emerald-800/80 text-xs font-bold">
+                    <span className="text-slate-700 dark:text-slate-300">Outstanding Due After Payment:</span>
+                    <span className="text-emerald-700 dark:text-emerald-300 font-mono text-sm font-black">
+                      {formatCurrency(
+                        Math.max(
+                          0,
+                          ("amountToCollect" in collectTarget
+                            ? collectTarget.remainingAmount || collectTarget.amountToCollect
+                            : collectTarget.pendingAmount || collectTarget.expectedAmount) - (Number(amount) || 0)
+                        )
+                      )}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Payment Method */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -1360,6 +1445,20 @@ export default function CollectionManagementPage() {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* INSTANT COLLECTION RECEIPT MODAL                                          */}
+      {/* ========================================================================= */}
+      <CollectionReceiptModal
+        isOpen={showReceiptModal}
+        onClose={() => {
+          setShowReceiptModal(false);
+          setReceiptPaymentId(null);
+          setReceiptInitialData(null);
+        }}
+        paymentId={receiptPaymentId}
+        initialData={receiptInitialData}
+      />
     </div>
   );
 }

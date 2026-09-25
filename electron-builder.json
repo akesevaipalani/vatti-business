@@ -15,7 +15,9 @@
       "from": ".next/standalone",
       "to": "server",
       "filter": [
-        "!node_modules"
+        "!node_modules",
+        "!backups",
+        "!.env"
       ]
     },
     {

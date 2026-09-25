@@ -15,35 +15,89 @@ const PUBLIC_PATHS = [
 
 // Admin-only paths
 const ADMIN_ONLY_PREFIXES = [
-  "/settings",
+  "/partners",
   "/backup",
   "/audit-log",
   "/day-closing",
+  "/api/partners",
   "/api/backup",
   "/api/settings",
+  "/api/day-closing",
+  "/api/audit-logs",
+  "/api/accounting",
 ];
+
+// Allowed origins for mobile apps (Capacitor Android/iOS) and web development
+const ALLOWED_ORIGINS = new Set([
+  "https://localhost",
+  "http://localhost",
+  "capacitor://localhost",
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://localhost:5173",
+]);
+
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  if (origin.endsWith(".up.railway.app")) return true;
+  return false;
+}
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowed = isAllowedOrigin(origin);
+  const allowOrigin = allowed ? origin! : "https://localhost";
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+    "Access-Control-Max-Age": "86400",
+  };
+}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const origin = request.headers.get("origin");
 
-  // 1. Allow static Next.js assets
+  // 1. Handle CORS preflight (OPTIONS) for all API routes immediately
+  if (request.method === "OPTIONS" && pathname.startsWith("/api/")) {
+    return new NextResponse(null, {
+      status: 204,
+      headers: getCorsHeaders(origin),
+    });
+  }
+
+  // Helper to attach CORS headers to responses
+  const withCors = (res: NextResponse): NextResponse => {
+    if (pathname.startsWith("/api/") && isAllowedOrigin(origin)) {
+      res.headers.set("Access-Control-Allow-Origin", origin!);
+      res.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+      res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept, Origin");
+      res.headers.set("Access-Control-Max-Age", "86400");
+    }
+    return res;
+  };
+
+  // 2. Allow static Next.js assets and public paths
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/public") ||
     PUBLIC_PATHS.includes(pathname)
   ) {
-    return NextResponse.next();
+    return withCors(NextResponse.next());
   }
 
-  // 2. Check for session cookie
+  // 3. Check for session cookie or Bearer authorization header
   const sessionCookie = request.cookies.get("vatti_session")?.value;
   const authHeader = request.headers.get("authorization");
   const hasToken = !!sessionCookie || (!!authHeader && authHeader.startsWith("Bearer "));
 
   if (!hasToken) {
-    // If an API route, return 401 Unauthorized
+    // If an API route, return 401 Unauthorized with CORS headers
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized access" }, { status: 401 });
+      return withCors(
+        NextResponse.json({ error: "Unauthorized access" }, { status: 401 })
+      );
     }
     // For pages, redirect to login
     const loginUrl = new URL("/login", request.url);
@@ -64,9 +118,11 @@ export function middleware(request: NextRequest) {
         const isAdminRoute = ADMIN_ONLY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
         if (isAdminRoute && payload.role !== "ADMIN") {
           if (pathname.startsWith("/api/")) {
-            return NextResponse.json(
-              { error: "Forbidden: Admin privileges required" },
-              { status: 403 }
+            return withCors(
+              NextResponse.json(
+                { error: "Forbidden: Admin privileges required" },
+                { status: 403 }
+              )
             );
           }
           return NextResponse.redirect(new URL("/dashboard", request.url));
@@ -80,7 +136,7 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  return withCors(NextResponse.next());
 }
 
 export const config = {
