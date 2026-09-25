@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.gradle/
+build/
+android/app/build/
+android/.gradle/
+android/build/
+android/captures/
+*.apk

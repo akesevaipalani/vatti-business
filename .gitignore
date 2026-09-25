@@ -90,4 +90,6 @@ CREDENTIALS/
 APK RELEASES/
 *.apk
 phase7_prompt*.txt
+**/.project
+
 
