@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   FileText,
   Share2,
@@ -46,18 +46,43 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
 
+  const [activeLoan, setActiveLoan] = useState<LoanDetail | null>(loan);
+
+  useEffect(() => {
+    if (loan) {
+      setActiveLoan(loan);
+      if (loan.id && (!loan.customer || !loan.installments || loan.installments.length === 0)) {
+        api.getLoan(loan.id).then((res) => {
+          if (res?.loan) {
+            setActiveLoan({
+              ...res.loan,
+              installments: ((res.loan.installments?.length ?? 0) > 0)
+                ? res.loan.installments
+                : ((res.schedule as any)?.length > 0 ? (res.schedule as any) : res.loan.installments || []),
+            });
+          }
+        }).catch((err) => {
+          console.warn("Failed to reload full loan for document modal:", err);
+        });
+      }
+    }
+  }, [loan, isOpen]);
+
   if (!isOpen || !loan) return null;
 
-  const loanNo = loan.loanNo || "ABC/LOAN/2026/000001";
-  const customerName = loan.customer?.name || "Customer";
-  const customerMobile = loan.customer?.mobile || "";
-  const totalPayable = loan.totalPayable || (loan.principalAmount || 0) + (loan.interestOutstanding || 0);
+  const currentLoan = activeLoan || loan;
+  const loanNo = currentLoan.loanNo || "ABC/LOAN/2026/000001";
+  const customerName = currentLoan.customer?.name || (currentLoan as any).customerName || "";
+  const customerMobile = currentLoan.customer?.mobile || (currentLoan as any).customerMobile || (currentLoan as any).mobile || "";
+  const customerAddress = [currentLoan.customer?.address, (currentLoan.customer as any)?.city].filter(Boolean).join(", ") || (currentLoan as any).customerAddress || (currentLoan as any).address || "";
+  const customerId = (currentLoan.customer as any)?.customerCode || (currentLoan.customer as any)?.customerId || "";
+  const totalPayable = currentLoan.totalPayable || (currentLoan.principalAmount || 0) + (currentLoan.interestOutstanding || 0);
 
   const buildLoanData = (): LoanDocumentData => {
-    const rawList: any[] = (loan.installments && loan.installments.length > 0)
-      ? loan.installments
-      : ((loan as any).schedule && (loan as any).schedule.length > 0)
-      ? (loan as any).schedule
+    const rawList: any[] = (currentLoan.installments && currentLoan.installments.length > 0)
+      ? currentLoan.installments
+      : ((currentLoan as any).schedule && (currentLoan as any).schedule.length > 0)
+      ? (currentLoan as any).schedule
       : [];
 
     let installments: any[] = [];
@@ -65,15 +90,15 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
     if (rawList.length > 0) {
       installments = rawList.map((inst: any, idx: number) => {
         const instNum = inst.installmentNumber ?? inst.installmentNo ?? (idx + 1);
-        const expAmt = Number(inst.installmentAmount ?? inst.amount ?? loan.installmentAmount ?? 0);
-        const prin = Number(inst.principalPortion ?? (loan.principalAmount / (loan.totalInstallments || 1)));
-        const intVal = Number(inst.interestPortion ?? ((totalPayable - loan.principalAmount) / (loan.totalInstallments || 1)));
+        const expAmt = Number(inst.installmentAmount ?? inst.amount ?? currentLoan.installmentAmount ?? 0);
+        const prin = Number(inst.principalPortion ?? (currentLoan.principalAmount / (currentLoan.totalInstallments || 1)));
+        const intVal = Number(inst.interestPortion ?? ((totalPayable - currentLoan.principalAmount) / (currentLoan.totalInstallments || 1)));
         const paid = Number(inst.paidAmount ?? (inst.status === "PAID" || inst.status === "COLLECTED" ? expAmt : 0));
         const bal = Number(inst.balanceAmount ?? Math.max(0, expAmt - paid));
 
         return {
           installmentNumber: instNum,
-          dueDate: inst.dueDate || new Date(),
+          dueDate: inst.dueDate || currentLoan.date || new Date(),
           principalAmount: prin,
           interestAmount: intVal,
           installmentAmount: expAmt,
@@ -83,18 +108,18 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
         };
       });
     } else {
-      // Fallback synthesis from loan parameters
-      const count = loan.totalInstallments || 1;
-      const expAmt = loan.installmentAmount || (totalPayable / count);
-      const prinPerInst = (loan.principalAmount || 0) / count;
-      const intPerInst = Math.max(0, totalPayable - (loan.principalAmount || 0)) / count;
-      const baseDate = loan.createdAt ? new Date(loan.createdAt) : new Date();
+      // Fallback synthesis from authoritative loan date
+      const count = currentLoan.totalInstallments || 1;
+      const expAmt = currentLoan.installmentAmount || (totalPayable / count);
+      const prinPerInst = (currentLoan.principalAmount || 0) / count;
+      const intPerInst = Math.max(0, totalPayable - (currentLoan.principalAmount || 0)) / count;
+      const baseDate = currentLoan.date ? new Date(currentLoan.date) : (currentLoan.createdAt ? new Date(currentLoan.createdAt) : new Date());
 
       for (let i = 1; i <= count; i++) {
         const dDate = new Date(baseDate);
-        if (loan.paymentFrequency === "DAILY") {
+        if (currentLoan.paymentFrequency === "DAILY") {
           dDate.setDate(dDate.getDate() + i);
-        } else if (loan.paymentFrequency === "WEEKLY") {
+        } else if (currentLoan.paymentFrequency === "WEEKLY") {
           dDate.setDate(dDate.getDate() + i * 7);
         } else {
           dDate.setMonth(dDate.getMonth() + i);
@@ -114,21 +139,25 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
 
     return {
       loanNo,
-      date: loan.createdAt || loan.dueDate || new Date(),
+      date: currentLoan.date || currentLoan.createdAt || new Date(),
       customer: {
         name: customerName,
         mobile: customerMobile,
-        address: (loan.customer as any)?.address || (loan.customer as any)?.city || undefined,
-        customerId: (loan.customer as any)?.customerCode || undefined,
+        address: customerAddress || undefined,
+        customerId: customerId || undefined,
       },
-      principalAmount: loan.principalAmount,
-      interestType: loan.interestType || "PERCENTAGE",
-      interestRate: loan.interestRate || 0,
-      interestFrequency: (loan as any).interestFrequency || "MONTHLY",
-      paymentFrequency: loan.paymentFrequency || "DAILY",
-      totalInstallments: loan.totalInstallments || installments.length || 1,
-      installmentAmount: loan.installmentAmount,
-      totalInterest: Math.max(0, totalPayable - loan.principalAmount),
+      principalAmount: currentLoan.principalAmount,
+      customerReceives: (currentLoan as any).disbursedAmount || (currentLoan as any).customerReceives || undefined,
+      advanceInterest: (currentLoan as any).advanceInterest || undefined,
+      processingFee: currentLoan.processingFee || undefined,
+      loanCalculationType: (currentLoan as any).loanCalculationType || undefined,
+      interestType: currentLoan.interestType || "PERCENTAGE",
+      interestRate: currentLoan.interestRate || 0,
+      interestFrequency: (currentLoan as any).interestFrequency || "MONTHLY",
+      paymentFrequency: currentLoan.paymentFrequency || "DAILY",
+      totalInstallments: currentLoan.totalInstallments || installments.length || 1,
+      installmentAmount: currentLoan.installmentAmount,
+      totalInterest: Math.max(0, totalPayable - currentLoan.principalAmount),
       totalPayable,
       schedule: installments,
       company: DEFAULT_COMPANY_PROFILE,
@@ -288,7 +317,7 @@ ABC FINANCE | Contact: +91 96008 71898`;
             <div>
               <span className="text-slate-400 block">{language === "ta" ? "வழங்கிய அசல்" : "Principal Sanctioned"}</span>
               <span className="text-sm font-extrabold text-white">
-                ₹{loan.principalAmount.toLocaleString("en-IN")}
+                ₹{currentLoan.principalAmount.toLocaleString("en-IN")}
               </span>
             </div>
             <div>
@@ -300,13 +329,13 @@ ABC FINANCE | Contact: +91 96008 71898`;
             <div>
               <span className="text-slate-400 block">{language === "ta" ? "தவணை முறை" : "Frequency"}</span>
               <span className="text-xs font-semibold text-slate-200">
-                {loan.paymentFrequency} ({loan.totalInstallments} தவணைகள்)
+                {currentLoan.paymentFrequency} ({currentLoan.totalInstallments} தவணைகள்)
               </span>
             </div>
             <div>
               <span className="text-slate-400 block">{language === "ta" ? "தவணை தொகை" : "Installment Amount"}</span>
               <span className="text-sm font-extrabold text-emerald-400">
-                ₹{loan.installmentAmount.toLocaleString("en-IN")}
+                ₹{currentLoan.installmentAmount.toLocaleString("en-IN")}
               </span>
             </div>
           </div>
@@ -320,7 +349,7 @@ ABC FINANCE | Contact: +91 96008 71898`;
               {language === "ta" ? "தவணை அட்டவணை நிலை" : "Repayment Schedule Status"}
             </span>
             <span className="text-[11px] font-normal text-slate-500">
-              {loan.installments?.length || loan.totalInstallments} {language === "ta" ? "தவணைகள் தயார்" : "installments ready"}
+              {currentLoan.installments?.length || currentLoan.totalInstallments} {language === "ta" ? "தவணைகள் தயார்" : "installments ready"}
             </span>
           </div>
           <p className="text-[11px] text-slate-500">

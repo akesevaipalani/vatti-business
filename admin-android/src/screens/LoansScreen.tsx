@@ -403,8 +403,16 @@ export const LoansScreen: React.FC = () => {
       let dueDateFormatted = "-";
       if (rawDate) {
         try {
-          const d = new Date(rawDate);
-          dueDateFormatted = !isNaN(d.getTime()) ? d.toLocaleDateString("en-IN") : String(rawDate);
+          const str = String(rawDate).trim().slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+            const [y, m, day] = str.split("-");
+            dueDateFormatted = `${day}/${m}/${y}`;
+          } else {
+            const d = new Date(rawDate);
+            dueDateFormatted = !isNaN(d.getTime())
+              ? new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(d)
+              : String(rawDate);
+          }
         } catch { dueDateFormatted = String(rawDate); }
       }
       return { id: inst.id || `i-${instNum}`, installmentNumber: instNum, dueDateFormatted, installmentAmount: expectedAmt, principalPortion: prin, interestPortion: intVal, paidAmount: paid, balanceAmount: bal, status: String(inst.status || (bal === 0 ? "COLLECTED" : "PENDING")) };
@@ -527,6 +535,24 @@ export const LoansScreen: React.FC = () => {
             <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 {[
+                  {
+                    label: ta ? "கடன் வழங்கப்பட்ட தேதி" : "Disbursement Date",
+                    value: (() => {
+                      const d = selectedLoan.date || selectedLoan.createdAt;
+                      if (!d) return "-";
+                      const str = String(d).trim().slice(0, 10);
+                      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                        const [y, m, day] = str.split("-");
+                        return `${day}/${m}/${y}`;
+                      }
+                      const dt = new Date(d);
+                      return !isNaN(dt.getTime())
+                        ? new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(dt)
+                        : "-";
+                    })(),
+                    bold: true,
+                    color: "text-indigo-600",
+                  },
                   { label: ta ? "அசல் தொகை" : "Principal", value: `₹${fmt(selectedLoan.principalAmount || 0)}`, bold: true },
                   { label: ta ? "மொத்த தொகை" : "Total Payable", value: `₹${fmt(selectedLoan.totalPayable || 0)}`, bold: true },
                   { label: ta ? "வாடிக்கையாளர் பெற்றது" : "Customer Received", value: `₹${fmt(selectedLoan.customerReceives || selectedLoan.principalAmount || 0)}` },
@@ -607,7 +633,7 @@ export const LoansScreen: React.FC = () => {
 
             {/* Document Button */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button type="button" onClick={() => { setDocumentLoan({ ...selectedLoan, installments: scheduleItems.length > 0 ? (scheduleItems as any) : selectedLoan.installments }); setShowDocModal(true); }}
+              <button type="button" onClick={() => { setDocumentLoan({ ...selectedLoan, installments: scheduleItems.length > 0 ? (scheduleItems as any) : selectedLoan.installments, customer: selectedLoan.customer, date: selectedLoan.date }); setShowDocModal(true); }}
                 className="w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md tap-active">
                 <FileText className="w-4 h-4" />
                 <span>{ta ? "கடன் அனுமதி ஆவணம் (PDF & WhatsApp)" : "Sanction Order (PDF & WhatsApp)"}</span>

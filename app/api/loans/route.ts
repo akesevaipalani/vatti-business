@@ -190,7 +190,23 @@ export async function POST(req: Request) {
       },
     });
 
-    return NextResponse.json({ success: true, loan });
+    const fullLoan = await prisma.loan.findUnique({
+      where: { id: loan.id },
+      include: {
+        customer: true,
+        installments: {
+          orderBy: { installmentNumber: "asc" },
+        },
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      loan: {
+        ...(fullLoan || loan),
+        schedule: calc.schedule,
+      },
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to disburse loan";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -49,6 +49,10 @@ export interface LoanDocumentData {
     customerId?: string;
   };
   principalAmount: number;
+  customerReceives?: number;
+  advanceInterest?: number;
+  processingFee?: number;
+  loanCalculationType?: string;
   interestType: string;
   interestRate: number;
   interestFrequency: string;
@@ -92,26 +96,33 @@ export function formatIndianCurrency(amount: number, includeSymbol: boolean = tr
 
 export function formatDDMMYYYY(dateInput: string | Date | null | undefined): string {
   if (!dateInput) return "-";
+  if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateInput.trim())) {
+    const [y, m, d] = dateInput.trim().slice(0, 10).split("-");
+    return `${d}/${m}/${y}`;
+  }
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return "-";
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
 }
 
 export function formatDDMMYYYYTime(dateInput: string | Date | null | undefined): string {
   if (!dateInput) return "-";
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return "-";
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  let hours = d.getHours();
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${day}/${month}/${year} ${hours}:${minutes} ${ampm}`;
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
 }
 
 let cachedLogoBase64: string | null = null;
@@ -247,9 +258,9 @@ export async function generateLoanDocumentPdf(data: LoanDocumentData): Promise<j
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Name: ${data.customer.name}`, margin + 4, currentY + 12);
-  doc.text(`Contact: ${data.customer.mobile}`, margin + 4, currentY + 17);
-  doc.text(`Address: ${data.customer.address || "Local"}`, margin + 4, currentY + 22);
+  doc.text(`Name: ${data.customer.name || "—"}`, margin + 4, currentY + 12);
+  doc.text(`Contact: ${data.customer.mobile || "—"}`, margin + 4, currentY + 17);
+  doc.text(`Address: ${data.customer.address || "—"}`, margin + 4, currentY + 22);
   if (data.customer.customerId) {
     doc.text(`Customer ID: ${data.customer.customerId}`, margin + 4, currentY + 27);
   }
@@ -526,9 +537,9 @@ export async function generateCollectionReceiptPdf(data: CollectionReceiptData):
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Name: ${data.customer.name}`, margin + 4, currentY + 13);
-  doc.text(`Phone: ${data.customer.mobile}`, margin + 4, currentY + 19);
-  doc.text(`Address: ${data.customer.address || "Local"}`, margin + 4, currentY + 25);
+  doc.text(`Name: ${data.customer.name || "—"}`, margin + 4, currentY + 13);
+  doc.text(`Phone: ${data.customer.mobile || "—"}`, margin + 4, currentY + 19);
+  doc.text(`Address: ${data.customer.address || "—"}`, margin + 4, currentY + 25);
 
   // Loan & Payment Ref Box
   const col2X = margin + colWidth + 5;

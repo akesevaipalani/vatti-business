@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getLogoBase64 } from "./logo-helper";
+import { formatISTDisplay, formatISTDateTime } from "@/lib/date";
 
 export interface CompanyProfile {
   name: string;
@@ -94,28 +95,19 @@ export function formatIndianCurrency(amount: number, includeSymbol: boolean = tr
   return includeSymbol ? `Rs. ${formatted}` : formatted;
 }
 
-// Format date into DD/MM/YYYY
+// Format date into DD/MM/YYYY in IST
 export function formatDDMMYYYY(dateInput: string | Date | null | undefined): string {
   if (!dateInput) return "-";
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return "-";
-  const day = String(d.getDate()).padStart(2, "0");
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+  if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}/.test(dateInput.trim())) {
+    const [y, m, d] = dateInput.trim().slice(0, 10).split("-");
+    return `${d}/${m}/${y}`;
+  }
+  return formatISTDisplay(dateInput);
 }
 
-// Format date and time into DD/MM/YYYY hh:mm A
+// Format date and time into DD/MM/YYYY hh:mm A in IST
 export function formatDDMMYYYYTime(dateInput: string | Date | null | undefined): string {
-  if (!dateInput) return "-";
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return "-";
-  const dateStr = formatDDMMYYYY(d);
-  let hours = d.getHours();
-  const minutes = String(d.getMinutes()).padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12 || 12;
-  return `${dateStr} ${hours}:${minutes} ${ampm}`;
+  return formatISTDateTime(dateInput);
 }
 
 /**
@@ -200,10 +192,10 @@ export function generateLoanDocumentPdf(data: LoanDocumentData): jsPDF {
 
   doc.setFont("helvetica", "bold");
   doc.setTextColor(15, 23, 42);
-  doc.text(data.customer.name, margin + 32, custY);
-  doc.text(data.customer.mobile, margin + 32, custY + 6);
-  doc.text(data.customer.customerId || "-", margin + 32, custY + 12);
-  const addr = data.customer.address || "Tamil Nadu, India";
+  doc.text(data.customer.name || "—", margin + 32, custY);
+  doc.text(data.customer.mobile || "—", margin + 32, custY + 6);
+  doc.text(data.customer.customerId || "—", margin + 32, custY + 12);
+  const addr = data.customer.address?.trim() || "—";
   const splitAddr = doc.splitTextToSize(addr, colWidth - 36);
   doc.text(splitAddr, margin + 32, custY + 18);
 
@@ -603,10 +595,10 @@ export function generateCollectionReceiptPdf(data: CollectionReceiptData): jsPDF
 
   doc.setFont("helvetica", "bold");
   doc.setTextColor(15, 23, 42);
-  doc.text(data.customer.name, margin + 22, gridTop + 13);
-  doc.text(data.customer.mobile, margin + 22, gridTop + 19);
+  doc.text(data.customer.name || "—", margin + 22, gridTop + 13);
+  doc.text(data.customer.mobile || "—", margin + 22, gridTop + 19);
   doc.setFont("helvetica", "normal");
-  const custAddr = doc.splitTextToSize(data.customer.address || "Tamil Nadu, India", colW - 26);
+  const custAddr = doc.splitTextToSize(data.customer.address?.trim() || "—", colW - 26);
   doc.text(custAddr, margin + 22, gridTop + 25);
 
   // Box 2: Loan Particulars

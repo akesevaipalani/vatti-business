@@ -136,6 +136,7 @@ export interface LoanDetail {
   advanceInterest?: number;
   disbursedAmount?: number;
   status: "ACTIVE" | "CLOSED" | "OVERDUE" | string;
+  date?: string | Date;
   startDate: string;
   dueDate?: string;
   createdAt?: string;

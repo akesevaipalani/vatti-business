@@ -38,7 +38,7 @@ interface LoanListItem {
 }
 
 export default function LoansPage() {
-  const { t, formatCurrency } = useLanguage();
+  const { t, formatCurrency, formatDate } = useLanguage();
   const [loans, setLoans] = useState<LoanListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -213,6 +213,9 @@ export default function LoansPage() {
                       <Link href={`/loans/${loan.id}`} className="hover:underline">
                         {loan.loanNo}
                       </Link>
+                      <div className="text-[10px] text-slate-400 font-sans font-normal mt-0.5">
+                        {formatDate(loan.date)}
+                      </div>
                     </td>
                     <td className="py-3.5 px-4">
                       <div className="font-bold text-slate-900 dark:text-slate-100">

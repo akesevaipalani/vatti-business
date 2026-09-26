@@ -32,11 +32,21 @@ function fmt(n: number): string {
   return n.toLocaleString("en-IN");
 }
 
-function formatDateDMY(dateStr?: string): string {
+function formatDateDMY(dateStr?: string | Date): string {
   if (!dateStr) return "-";
+  const str = String(dateStr).trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split("-");
+    return `${d}/${m}/${y}`;
+  }
   const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  if (isNaN(d.getTime())) return String(dateStr);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(d);
 }
 
 function calcPreview(params: {
@@ -381,8 +391,18 @@ export const LoansScreen: React.FC = () => {
             <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-3 pb-2 border-b border-slate-200 dark:border-slate-700">
                 <div>
+                  <span className="text-slate-400 text-[11px] block">{ta ? "கடன் வழங்கப்பட்ட தேதி" : "Disbursement Date"}</span>
+                  <span className="text-sm font-bold text-indigo-600">{formatDateDMY(selectedLoan.date || selectedLoan.createdAt)}</span>
+                </div>
+                <div className="text-right">
                   <span className="text-slate-400 text-[11px] block">{ta ? "அசல் தொகை" : "Principal"}</span>
                   <span className="text-base font-extrabold text-slate-900 dark:text-white">₹{selectedLoan.principalAmount.toLocaleString("en-IN")}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 pb-2 border-b border-slate-200 dark:border-slate-700">
+                <div>
+                  <span className="text-slate-400 text-[11px] block">{ta ? "தவணை தொகை" : "Installment"}</span>
+                  <span className="text-base font-bold text-indigo-600">₹{(selectedLoan.installmentAmount || 0).toLocaleString("en-IN")}</span>
                 </div>
                 <div className="text-right">
                   <span className="text-slate-400 text-[11px] block">{ta ? "மொத்த திரும்பச் செலுத்தல்" : "Total Payable"}</span>

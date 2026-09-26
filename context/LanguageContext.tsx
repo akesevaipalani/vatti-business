@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { getTranslations, Translations } from "@/lib/translations";
+import { formatISTDisplay, formatISTDateTime } from "@/lib/date";
 
 interface LanguageContextType {
   lang: "en" | "ta";
@@ -54,29 +55,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   };
 
   const formatDate = (date: Date | string | null | undefined): string => {
-    if (!date) return "-";
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return "-";
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
+    return formatISTDisplay(date);
   };
 
   const formatDateTime = (date: Date | string | null | undefined): string => {
-    if (!date) return "-";
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return "-";
-    const day = String(d.getDate()).padStart(2, "0");
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const year = d.getFullYear();
-    let hours = d.getHours();
-    const minutes = String(d.getMinutes()).padStart(2, "0");
-    const ampm = hours >= 12 ? "PM" : "AM";
-    hours = hours % 12;
-    hours = hours ? hours : 12;
-    const strHours = String(hours).padStart(2, "0");
-    return `${day}/${month}/${year} ${strHours}:${minutes} ${ampm}`;
+    return formatISTDateTime(date);
   };
 
   return (
