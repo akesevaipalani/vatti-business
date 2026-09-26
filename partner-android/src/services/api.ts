@@ -5,9 +5,13 @@ import {
   Customer,
   LoanDetail,
   TodayCollectionListResponse,
+  CollectionScheduleResponse,
   PendingCollectionListResponse,
   LoanPayment,
+  TodayCollectionItem,
+  CollectedTodayPaymentItem,
 } from "../types";
+import { getTodayIST, toISTDateString, formatISTDisplay, formatISTDateTime } from "../utils/date";
 
 export const DEFAULT_PRODUCTION_URL = "https://vatti-business-production.up.railway.app";
 
@@ -19,11 +23,13 @@ export function getServerUrl(): string {
   const custom = localStorage.getItem(SERVER_URL_KEY);
   if (custom && custom.trim()) {
     const trimmed = custom.trim().replace(/\/+$/, "");
-    // If custom URL is pointing to Android WebView origin, reset to production Railway
     if (
-      trimmed === "https://localhost" ||
-      trimmed === "http://localhost" ||
-      trimmed === "capacitor://localhost"
+      trimmed.includes("localhost") ||
+      trimmed.includes("127.0.0.1") ||
+      trimmed.startsWith("capacitor://") ||
+      trimmed === "undefined" ||
+      trimmed === "null" ||
+      !trimmed.startsWith("http")
     ) {
       localStorage.removeItem(SERVER_URL_KEY);
       return DEFAULT_PRODUCTION_URL;
@@ -31,12 +37,14 @@ export function getServerUrl(): string {
     return trimmed;
   }
 
-  // If in desktop browser development (Vite port 5173)
+  if (Capacitor.isNativePlatform()) {
+    return DEFAULT_PRODUCTION_URL;
+  }
+
   if (typeof window !== "undefined" && window.location.port === "5173") {
     return "http://localhost:3001";
   }
 
-  // Default to production Railway HTTPS backend for Android APK
   return DEFAULT_PRODUCTION_URL;
 }
 
@@ -161,8 +169,8 @@ export function resetDiagnostic() {
   diagnosticListeners.forEach((l) => l(current));
 }
 
-export const TIMEOUT_DURATION_MS = 15000;
-export const TIMEOUT_ERROR_MESSAGE = "Unable to connect to server. Please try again.";
+export const TIMEOUT_DURATION_MS = 45000;
+export const TIMEOUT_ERROR_MESSAGE = "Unable to connect to server. Please check Loans before retrying.";
 
 interface RawApiResponse<T> {
   status: number;
@@ -234,8 +242,8 @@ async function apiRequestInternal<T>(endpoint: string, options: RequestInit = {}
         method,
         headers: reqHeaders,
         data: parsedData,
-        connectTimeout: 12000,
-        readTimeout: 12000,
+        connectTimeout: 45000,
+        readTimeout: 45000,
       });
 
       status = nativeRes.status;
@@ -263,7 +271,7 @@ async function apiRequestInternal<T>(endpoint: string, options: RequestInit = {}
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s internal abort
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s internal abort
 
     try {
       const res = await fetch(url, {
@@ -326,16 +334,19 @@ async function apiRequestInternal<T>(endpoint: string, options: RequestInit = {}
     }
 
     if (typeof data === "string" && (data.includes("<!doctype") || data.includes("<html") || data.includes("<head"))) {
-      throw new Error("Server configuration error. Please check Server Connection URL. (சர்வர் இணைப்பு பிழை)");
+      if (status === 404) {
+        throw new Error(`Endpoint not found: ${endpoint} (HTTP 404)`);
+      }
+      throw new Error(`Server returned HTML error (${status}) for ${endpoint}. Please verify Server URL.`);
     }
 
-    throw new Error(`கோரிக்கை தோல்வியடைந்தது (Request failed with status ${status})`);
+    throw new Error(`கோரிக்கை தோல்வியடைந்தது (Request failed with status ${status} on ${endpoint})`);
   }
 
   // Parse string data if JSON
   if (typeof data === "string") {
-    if (data.includes("<!doctype") || data.includes("<html")) {
-      throw new Error("Server configuration error. Please check Server Connection URL. (சர்வர் இணைப்பு பிழை)");
+    if (data.includes("<!doctype") || data.includes("<html") || data.includes("<head")) {
+      throw new Error(`Server returned unexpected HTML (${status}) for ${endpoint}. Please verify Server URL.`);
     }
     try {
       data = JSON.parse(data);
@@ -643,10 +654,296 @@ export const api = {
     return apiRequest<{ loan: LoanDetail; schedule: unknown[] }>(`/api/loans/${id}`);
   },
 
-  // Daily Collections
+  async createLoan(data: {
+    customerId: string;
+    principalAmount: number;
+    // Loan Category
+    loanCalculationType?: "STANDARD" | "ADVANCE_INTEREST" | "INTEREST_PRINCIPAL";
+    // Standard Loan
+    interestType?: string;
+    interestRate?: number;
+    interestFrequency?: string;
+    customInterestAmount?: number;
+    // Advance Interest
+    advanceInterestAmount?: number;
+    customInstallmentAmount?: number;
+    // Interest + Principal
+    principalPerInstallment?: number;
+    interestPerInstallment?: number;
+    // Common
+    paymentFrequency: string;
+    totalInstallments: number;
+    processingFee?: number;
+    paymentMethod: string;
+    startDate: string;
+    notes?: string;
+  }): Promise<{ success: boolean; loan: LoanDetail }> {
+    return apiRequest<{ success: boolean; loan: LoanDetail }>("/api/loans", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Daily Collections & Reconciled Schedule
   async getTodayCollections(date?: string): Promise<TodayCollectionListResponse> {
     const qs = date ? `?date=${encodeURIComponent(date)}` : "";
     return apiRequest<TodayCollectionListResponse>(`/api/collections/today${qs}`);
+  },
+
+  async getCollectionSchedule(date?: string): Promise<CollectionScheduleResponse> {
+    const targetDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getTodayIST();
+    const qs = `?date=${encodeURIComponent(targetDate)}`;
+
+    // Resilient collection schedule sourced directly from production Railway endpoints
+    const [todayRes, pendingRes, colRes] = await Promise.all([
+      this.getTodayCollections(targetDate).catch((err) => {
+        console.warn("[CollectionSchedule] getTodayCollections error:", err);
+        return {
+          date: targetDate,
+          totalCustomers: 0,
+          totalAmountToCollect: 0,
+          totalCollected: 0,
+          totalRemaining: 0,
+          items: [] as TodayCollectionItem[],
+        };
+      }),
+      this.getPendingCollections(targetDate).catch((err) => {
+        console.warn("[CollectionSchedule] getPendingCollections error:", err);
+        return {
+          date: targetDate,
+          totalPendingCustomers: 0,
+          totalPendingInstallments: 0,
+          totalPendingAmount: 0,
+          items: [] as TodayCollectionItem[],
+        };
+      }),
+      this.getCollectionHistory().catch((err) => {
+        console.warn("[CollectionSchedule] getCollectionHistory error:", err);
+        return {
+          payments: [] as LoanPayment[],
+          totalCollected: 0,
+          totalPrincipal: 0,
+          totalInterest: 0,
+        };
+      }),
+    ]);
+
+    // 1. Normalize Today's Due Installments
+    const rawToday = Array.isArray(todayRes.items) ? todayRes.items : [];
+    const todayDue: TodayCollectionItem[] = rawToday.map((item: any) => {
+      const instAmount = Number(item.amount ?? item.dueAmount ?? item.installmentAmount ?? 0);
+      const paid = Number(item.paidAmount ?? 0);
+      const pending = item.pendingAmount !== undefined ? Number(item.pendingAmount) : Math.max(0, instAmount - paid);
+      const isPaid = item.status === "PAID" || (paid >= instAmount && instAmount > 0);
+      const isPartial = !isPaid && paid > 0;
+      const status = isPaid ? "PAID" : isPartial ? "PARTIAL" : (item.status || "PENDING");
+
+      const anyItem = item as any;
+      return {
+        ...item,
+        id: String(anyItem.id || anyItem.installmentId || ""),
+        installmentId: String(anyItem.installmentId || anyItem.id || ""),
+        loanId: anyItem.loanId || "",
+        loanNo: anyItem.loanNo || anyItem.loan?.loanNo || "",
+        customerId: anyItem.customerId || "",
+        customerName: anyItem.customerName || anyItem.customer?.name || "",
+        customerMobile: anyItem.customerMobile || anyItem.mobile || anyItem.customer?.mobile || "",
+        mobile: anyItem.mobile || anyItem.customerMobile || anyItem.customer?.mobile || "",
+        address: anyItem.address || "",
+        installmentNo: Number(anyItem.installmentNo || anyItem.installmentNumber || 1),
+        installmentNumber: Number(anyItem.installmentNumber || anyItem.installmentNo || 1),
+        scheduledCollectionDate: anyItem.scheduledCollectionDate || anyItem.dueDate || targetDate,
+        amountToCollect: instAmount,
+        amount: instAmount,
+        dueAmount: instAmount,
+        installmentAmount: instAmount,
+        principal: Number(anyItem.principal || anyItem.principalPortion || 0),
+        interest: Number(anyItem.interest || anyItem.interestPortion || 0),
+        paidAmount: paid,
+        pendingAmount: pending,
+        remainingAmount: pending,
+        balance: pending,
+        balanceAmount: pending,
+        principalPortion: Number(anyItem.principalPortion || 0),
+        interestPortion: Number(anyItem.interestPortion || 0),
+        dueDate: anyItem.dueDate || targetDate,
+        status,
+      };
+    });
+
+    // 2. Normalize Pending Installments
+    const todayPendingDue = todayDue.filter((i) => i.status !== "PAID" && (i.pendingAmount ?? i.amount ?? i.amountToCollect ?? 0) > 0);
+
+    const additionalPending: TodayCollectionItem[] = [];
+    if (Array.isArray((pendingRes as any).items)) {
+      for (const item of (pendingRes as any).items) {
+        const instAmount = Number(item.amount ?? item.dueAmount ?? item.installmentAmount ?? item.amountToCollect ?? 0);
+        const paid = Number(item.paidAmount ?? 0);
+        const pending = item.pendingAmount !== undefined ? Number(item.pendingAmount) : Math.max(0, instAmount - paid);
+        const anyItem = item as any;
+        additionalPending.push({
+          ...item,
+          id: String(anyItem.id || anyItem.installmentId || ""),
+          installmentId: String(anyItem.installmentId || anyItem.id || ""),
+          loanId: anyItem.loanId || "",
+          loanNo: anyItem.loanNo || anyItem.loan?.loanNo || "",
+          customerId: anyItem.customerId || "",
+          customerName: anyItem.customerName || anyItem.customer?.name || "",
+          customerMobile: anyItem.customerMobile || anyItem.mobile || anyItem.customer?.mobile || "",
+          mobile: anyItem.mobile || anyItem.customerMobile || anyItem.customer?.mobile || "",
+          address: anyItem.address || "",
+          installmentNo: Number(anyItem.installmentNo || anyItem.installmentNumber || 1),
+          installmentNumber: Number(anyItem.installmentNumber || anyItem.installmentNo || 1),
+          scheduledCollectionDate: anyItem.scheduledCollectionDate || anyItem.dueDate || targetDate,
+          amountToCollect: instAmount,
+          amount: instAmount,
+          dueAmount: instAmount,
+          installmentAmount: instAmount,
+          principal: Number(anyItem.principal || anyItem.principalPortion || 0),
+          interest: Number(anyItem.interest || anyItem.interestPortion || 0),
+          paidAmount: paid,
+          pendingAmount: pending,
+          remainingAmount: pending,
+          balance: pending,
+          balanceAmount: pending,
+          principalPortion: Number(anyItem.principalPortion || 0),
+          interestPortion: Number(anyItem.interestPortion || 0),
+          dueDate: anyItem.dueDate || targetDate,
+          status: anyItem.status || "PENDING",
+        });
+      }
+    } else if (Array.isArray((pendingRes as any).customers)) {
+      for (const c of (pendingRes as any).customers) {
+        if (Array.isArray(c.installments)) {
+          for (const item of c.installments) {
+            const instAmount = Number(item.amount ?? item.dueAmount ?? item.installmentAmount ?? item.expectedAmount ?? 0);
+            const paid = Number(item.paidAmount ?? item.collectedAmount ?? 0);
+            const pending = item.pendingAmount !== undefined ? Number(item.pendingAmount) : Math.max(0, instAmount - paid);
+            const anyItem = item as any;
+            additionalPending.push({
+              ...item,
+              id: String(anyItem.id || anyItem.installmentId || ""),
+              installmentId: String(anyItem.installmentId || anyItem.id || ""),
+              loanId: anyItem.loanId || "",
+              loanNo: anyItem.loanNo || anyItem.loan?.loanNo || "",
+              customerId: anyItem.customerId || c.customerId || "",
+              customerName: anyItem.customerName || c.customerName || "",
+              customerMobile: anyItem.customerMobile || anyItem.mobile || c.mobile || "",
+              mobile: anyItem.mobile || anyItem.customerMobile || c.mobile || "",
+              address: anyItem.address || c.address || "",
+              installmentNo: Number(anyItem.installmentNo || anyItem.installmentNumber || 1),
+              installmentNumber: Number(anyItem.installmentNumber || anyItem.installmentNo || 1),
+              scheduledCollectionDate: anyItem.scheduledCollectionDate || anyItem.dueDate || targetDate,
+              amountToCollect: instAmount,
+              amount: instAmount,
+              dueAmount: instAmount,
+              installmentAmount: instAmount,
+              principal: Number(anyItem.principal || anyItem.principalPortion || 0),
+              interest: Number(anyItem.interest || anyItem.interestPortion || 0),
+              paidAmount: paid,
+              pendingAmount: pending,
+              remainingAmount: pending,
+              balance: pending,
+              balanceAmount: pending,
+              principalPortion: Number(anyItem.principalPortion || 0),
+              interestPortion: Number(anyItem.interestPortion || 0),
+              dueDate: anyItem.dueDate || targetDate,
+              status: anyItem.status || "PENDING",
+            });
+          }
+        }
+      }
+    }
+
+    const pendingMap = new Map<string, TodayCollectionItem>();
+    for (const item of [...todayPendingDue, ...additionalPending]) {
+      const key = item.installmentId || item.id || `${item.loanId}_${item.installmentNo}`;
+      if (!pendingMap.has(key)) {
+        pendingMap.set(key, item);
+      }
+    }
+    const todayPending = Array.from(pendingMap.values());
+
+    // 3. Normalize Collected Today
+    const allPayments = Array.isArray(colRes.payments) ? colRes.payments : [];
+    const collectedToday: CollectedTodayPaymentItem[] = allPayments
+      .filter((p: any) => {
+        if (!p.date) return false;
+        const pDate = toISTDateString(p.date) || p.date.substring(0, 10);
+        return pDate === targetDate;
+      })
+      .map((p: any) => {
+        let instNo: number | null = null;
+        const match = (p.notes || "").match(/#(\d+)/);
+        if (match) instNo = Number(match[1]);
+
+        return {
+          id: p.id,
+          paymentNo: p.paymentNo || `RCP-${p.id.substring(0, 6).toUpperCase()}`,
+          loanId: p.loanId,
+          loanNo: p.loan?.loanNo || "",
+          customerId: p.customerId,
+          customerName: p.customer?.name || "",
+          customerCode: p.customer?.code || "",
+          mobile: p.customer?.mobile || "",
+          installmentNumber: instNo,
+          installmentNo: instNo,
+          collectionDate: formatISTDateTime(p.date) || p.date,
+          date: toISTDateString(p.date) || p.date.substring(0, 10),
+          amount: Number(p.amount || 0),
+          amountCollected: Number(p.amount || 0),
+          principalPortion: Number(p.principalPortion || 0),
+          interestPortion: Number(p.interestPortion || 0),
+          paymentMethod: p.paymentMethod || "CASH",
+          status: "PAID",
+          notes: p.notes || null,
+        };
+      });
+
+    // 4. Overdue
+    const overdue = todayPending.filter((item) => {
+      if (item.status === "OVERDUE") return true;
+      if (item.dueDate && item.dueDate.substring(0, 10) < targetDate) return true;
+      return false;
+    });
+
+    // 5. Reconciled Financial Metrics
+    const todayDueAmount = todayRes.totalAmountToCollect ?? todayDue.reduce((s, i) => s + (i.amount || 0), 0);
+    const todayDueCount = todayRes.totalCustomers ?? todayDue.length;
+    const todayCollectedOnDue = todayRes.totalCollected ?? todayDue.reduce((s, i) => s + (i.paidAmount || 0), 0);
+    const todayPendingAmount = todayRes.totalRemaining ?? todayPendingDue.reduce((s, i) => s + (i.pendingAmount || 0), 0);
+    const todayPendingCount = todayPendingDue.length;
+    const todayCollectedAmount = collectedToday.reduce((s, p) => s + p.amount, 0);
+    const todayCollectedCount = collectedToday.length;
+    const overdueAmount = overdue.reduce((s, i) => s + (i.pendingAmount ?? i.amount ?? i.amountToCollect ?? 0), 0);
+    const overdueCount = overdue.length;
+
+    return {
+      date: targetDate,
+      dateDisplay: formatISTDisplay(targetDate),
+      summary: {
+        todayDueAmount,
+        todayDueCount,
+        todayCollectedAmount,
+        todayCollectedCount,
+        todayPendingAmount,
+        todayPendingCount,
+        todayCollectedOnDue,
+        overdueAmount,
+        overdueCount,
+        futureCount: 0,
+        reconciled: true,
+      },
+      todayDue,
+      todayPending,
+      collectedToday,
+      overdue,
+      totalCustomers: todayDueCount,
+      totalAmountToCollect: todayDueAmount,
+      totalCollected: todayCollectedOnDue,
+      totalRemaining: todayPendingAmount,
+      items: todayDue,
+    };
   },
 
   async getPendingCollections(date?: string): Promise<PendingCollectionListResponse> {
@@ -684,5 +981,43 @@ export const api = {
       totalPrincipal: number;
       totalInterest: number;
     }>(`/api/collections${qs}`);
+  },
+
+  // Document Management & WhatsApp
+  getLoanDocumentDownloadUrl(id: string): string {
+    return `${getServerUrl()}/api/documents/loan-document?id=${encodeURIComponent(id)}&download=1`;
+  },
+
+  getCollectionReceiptDownloadUrl(paymentId: string): string {
+    return `${getServerUrl()}/api/documents/collection-receipt?paymentId=${encodeURIComponent(paymentId)}&download=1`;
+  },
+
+  async getLoanDocumentData(id: string): Promise<any> {
+    return apiRequest<any>(`/api/documents/loan-document?id=${encodeURIComponent(id)}&format=json`);
+  },
+
+  async getCollectionReceiptData(paymentId: string): Promise<any> {
+    return apiRequest<any>(`/api/documents/collection-receipt?paymentId=${encodeURIComponent(paymentId)}&format=json`);
+  },
+
+  async sendWhatsAppDocument(
+    type: "RECEIPT" | "LOAN",
+    id: string,
+    recipientPhone?: string
+  ): Promise<{
+    success: boolean;
+    deliveryMode: "AUTOMATIC" | "MANUAL";
+    configured: boolean;
+    status: "SENT" | "FAILED" | "NOT_CONFIGURED";
+    messageText?: string;
+    shareUrl?: string;
+    documentUrl?: string;
+    recipientPhone?: string;
+    error?: string;
+  }> {
+    return apiRequest<any>("/api/documents/send-whatsapp", {
+      method: "POST",
+      body: JSON.stringify({ type, id, recipientPhone }),
+    });
   },
 };

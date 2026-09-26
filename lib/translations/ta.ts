@@ -83,6 +83,13 @@ export const ta: Translations = {
   pendingCollections: "நிலுவையில் உள்ள வசூல்",
   pendingInterest: "நிலுவை வட்டி",
   overdueAmounts: "தவணை கடந்த தொகை",
+  todaysCollection: "இன்றைய வசூல்",
+  todaysPending: "இன்றைய நிலுவை",
+  collectedToday: "இன்று வசூலித்தது",
+  overdueSchedule: "காலதாமத நிலுவை",
+  dueAmount: "செலுத்த வேண்டிய தொகை",
+  collectedAmount: "வசூலித்த தொகை",
+  pendingAmount: "நிலுவை தொகை",
 
   // Common Table & Form labels
   actions: "செயல்கள்",

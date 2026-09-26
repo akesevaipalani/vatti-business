@@ -1,49 +1,86 @@
 import { prisma } from "@/lib/prisma";
+import crypto from "crypto";
 import { calculateLoan } from "@/lib/loans/calculator";
 import { postLoanCollection } from "@/lib/accounting/engine";
 import { syncEvents } from "@/lib/sync/events";
 import { getNextReceiptNumber } from "@/lib/documents/numbering";
+import {
+  getTodayIST,
+  toISTDateString,
+  getISTDayRange,
+  formatISTDisplay,
+  formatISTDateTime,
+} from "@/lib/date";
 
 export interface InstallmentScheduleItem {
   id: string;
+  installmentId: string;
   loanId: string;
   loanNo: string;
   customerId: string;
   customerName: string;
+  customerCode: string;
   mobile: string;
+  customerMobile: string;
   address: string;
   installmentNumber: number;
-  scheduledCollectionDate: string; // ISO / YYYY-MM-DD
+  installmentNo: number;
+  scheduledCollectionDate: string; // YYYY-MM-DD
+  dueDate: string; // DD/MM/YYYY for UI
+  dueDateYMD: string; // YYYY-MM-DD
   amountToCollect: number;
+  amount: number;
+  dueAmount: number;
+  installmentAmount: number;
   principal: number;
+  principalPortion: number;
   interest: number;
+  interestPortion: number;
   paidAmount: number;
+  principalPaid: number;
+  interestPaid: number;
   remainingAmount: number;
-  status: "PENDING" | "COLLECTED" | "PARTIALLY_PAID" | "OVERDUE";
+  pendingAmount: number;
+  balance: number;
+  balanceAmount: number;
+  status: "PENDING" | "PAID" | "PARTIAL" | "OVERDUE";
+  statusRaw: "PENDING" | "COLLECTED" | "PARTIALLY_PAID" | "OVERDUE";
   actualPaymentDate?: string | null;
+  paymentMethod?: string | null;
+  notes?: string | null;
 }
 
-export interface PendingInstallmentItem {
+export interface CollectedTodayPaymentItem {
   id: string;
+  paymentNo: string;
   loanId: string;
   loanNo: string;
   customerId: string;
   customerName: string;
+  customerCode: string;
   mobile: string;
-  address: string;
-  installmentNumber: number;
-  dueDate: string;
+  installmentNumber?: number | null;
+  installmentNo?: number | null;
+  collectionDate: string; // DD/MM/YYYY, hh:mm A
+  date: string; // YYYY-MM-DD
+  amount: number;
+  amountCollected: number;
+  principalPortion: number;
+  interestPortion: number;
+  paymentMethod: string;
+  status: "PAID";
+  notes?: string | null;
+}
+
+export interface PendingInstallmentItem extends InstallmentScheduleItem {
   expectedAmount: number;
   collectedAmount: number;
-  pendingAmount: number;
-  principal: number;
-  interest: number;
-  status: "PENDING" | "PARTIALLY_PAID" | "OVERDUE";
 }
 
 export interface CustomerPendingSummary {
   customerId: string;
   customerName: string;
+  customerCode: string;
   mobile: string;
   address: string;
   loans: Array<{ loanId: string; loanNo: string }>;
@@ -52,30 +89,104 @@ export interface CustomerPendingSummary {
   totalExpectedAmount: number;
   totalCollectedAmount: number;
   totalPendingAmount: number;
-  status: "PENDING" | "PARTIALLY_PAID" | "OVERDUE";
+  status: "PENDING" | "PARTIAL" | "OVERDUE";
   installments: PendingInstallmentItem[];
 }
 
-// Helper to format Date to YYYY-MM-DD in local time
-export function formatDateToYMD(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-// Helper to parse YYYY-MM-DD into start and end of that day (UTC boundary friendly)
-export function getDayRange(dateStr: string): { start: Date; end: Date } {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const start = new Date(y, m - 1, d, 0, 0, 0, 0);
-  const end = new Date(y, m - 1, d, 23, 59, 59, 999);
-  return { start, end };
+export interface CollectionScheduleResponse {
+  success: boolean;
+  date: string; // YYYY-MM-DD
+  dateDisplay: string; // DD/MM/YYYY
+  summary: {
+    todayDueAmount: number;
+    todayDueCount: number;
+    todayCollectedAmount: number;
+    todayCollectedCount: number;
+    todayPendingAmount: number;
+    todayPendingCount: number;
+    todayCollectedOnDue: number;
+    overdueAmount: number;
+    overdueCount: number;
+    futureCount: number;
+    reconciled: boolean;
+  };
+  todayDue: InstallmentScheduleItem[]; // TAB 1: Today's Collection
+  todayPending: InstallmentScheduleItem[]; // TAB 2: Today's Pending
+  collectedToday: CollectedTodayPaymentItem[]; // TAB 3: Collected Today
+  overdue: InstallmentScheduleItem[];
+  customers: CustomerPendingSummary[];
 }
 
 /**
- * Generate LoanInstallment records for a specific loan based on calculateLoan()
+ * Backward-compatible helper to format Date to YYYY-MM-DD in IST
  */
-export async function generateInstallmentsForLoan(loanId: string) {
+export function formatDateToYMD(d: Date | string | number): string {
+  return toISTDateString(d);
+}
+
+/**
+ * Backward-compatible day range helper
+ */
+export function getDayRange(dateStr: string): { start: Date; end: Date } {
+  const range = getISTDayRange(dateStr);
+  return { start: range.start, end: range.end };
+}
+
+/**
+ * Generate LoanInstallment records for a specific loan based on calculateLoan() or precalculated schedule
+ */
+export async function generateInstallmentsForLoan(
+  loanId: string,
+  precalculatedSchedule?: Array<{
+    installmentNumber: number;
+    dueDate: string;
+    installmentAmount: number;
+    principalPortion: number;
+    interestPortion: number;
+  }>,
+  loanMetadata?: {
+    customerId: string;
+  }
+) {
+  const todayIST = getTodayIST();
+
+  // FAST PATH: Precalculated schedule passed directly from loan creation
+  if (precalculatedSchedule && precalculatedSchedule.length > 0 && loanMetadata?.customerId) {
+    const installmentData = precalculatedSchedule.map((item) => {
+      const [y, m, d] = item.dueDate.split("-").map(Number);
+      const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+      const dueDateUtcMs = Date.UTC(y, m - 1, d, 12, 0, 0) - IST_OFFSET_MS;
+      const dueDate = new Date(dueDateUtcMs);
+      const isPastDue = item.dueDate < todayIST;
+
+      return {
+        id: crypto.randomUUID(),
+        loanId,
+        customerId: loanMetadata.customerId,
+        installmentNumber: item.installmentNumber,
+        dueDate,
+        installmentAmount: item.installmentAmount,
+        principalPortion: item.principalPortion,
+        interestPortion: item.interestPortion,
+        paidAmount: 0,
+        principalPaid: 0,
+        interestPaid: 0,
+        status: isPastDue ? "OVERDUE" : "PENDING",
+      };
+    });
+
+    if (installmentData.length > 0) {
+      for (let i = 0; i < installmentData.length; i += 100) {
+        const chunk = installmentData.slice(i, i + 100);
+        await prisma.loanInstallment.createMany({
+          data: chunk,
+        });
+      }
+    }
+    return;
+  }
+
+  // FALLBACK: Query from database if called standalone (e.g. bootstrap)
   const loan = await prisma.loan.findUnique({
     where: { id: loanId },
     include: { customer: true },
@@ -96,7 +207,7 @@ export async function generateInstallmentsForLoan(loanId: string) {
     interestRate: loan.interestRate,
     interestType: loan.interestType as "FLAT" | "REDUCING" | "SIMPLE",
     advanceInterestAmount: l.advanceInterest,
-    customInterestAmount: loan.totalPayable > loan.principalAmount ? (loan.totalPayable - loan.principalAmount) : undefined,
+    customInterestAmount: loan.totalPayable > loan.principalAmount ? loan.totalPayable - loan.principalAmount : undefined,
     customInstallmentAmount: loan.installmentAmount,
     processingFee: loan.processingFee,
     interestFrequency: loan.interestFrequency as "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY",
@@ -105,15 +216,16 @@ export async function generateInstallmentsForLoan(loanId: string) {
     startDate: loan.date,
   });
 
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-
   const installmentData = calc.schedule.map((item) => {
     const [y, m, d] = item.dueDate.split("-").map(Number);
-    const dueDate = new Date(y, m - 1, d, 12, 0, 0); // Midday to avoid timezone drift
-    const isPastDue = dueDate < now;
+    // Midday (12:00:00) IST ensures date stays firmly inside the calendar day
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const dueDateUtcMs = Date.UTC(y, m - 1, d, 12, 0, 0) - IST_OFFSET_MS;
+    const dueDate = new Date(dueDateUtcMs);
+    const isPastDue = item.dueDate < todayIST;
 
     return {
+      id: crypto.randomUUID(),
       loanId: loan.id,
       customerId: loan.customerId,
       installmentNumber: item.installmentNumber,
@@ -128,10 +240,13 @@ export async function generateInstallmentsForLoan(loanId: string) {
     };
   });
 
-  for (const inst of installmentData) {
-    await prisma.loanInstallment.create({
-      data: inst,
-    });
+  if (installmentData.length > 0) {
+    for (let i = 0; i < installmentData.length; i += 100) {
+      const chunk = installmentData.slice(i, i + 100);
+      await prisma.loanInstallment.createMany({
+        data: chunk,
+      });
+    }
   }
 }
 
@@ -139,20 +254,18 @@ export async function generateInstallmentsForLoan(loanId: string) {
  * Bootstrap installments for any active loan that does not have installments in the database
  */
 export async function bootstrapExistingLoans() {
-  const activeLoans = await prisma.loan.findMany({
-    where: { status: { in: ["ACTIVE", "OVERDUE"] } },
+  const activeLoansWithoutInstallments = await prisma.loan.findMany({
+    where: {
+      status: { in: ["ACTIVE", "OVERDUE"] },
+      installments: { none: {} },
+    },
     include: { payments: { orderBy: { date: "asc" } } },
   });
 
-  for (const loan of activeLoans) {
-    const count = await prisma.loanInstallment.count({
-      where: { loanId: loan.id },
-    });
+  for (const loan of activeLoansWithoutInstallments) {
+    await generateInstallmentsForLoan(loan.id);
 
-    if (count === 0) {
-      await generateInstallmentsForLoan(loan.id);
-
-      // If loan already has payments recorded, reconcile them FIFO
+      // Reconcile existing payments FIFO
       if (loan.payments.length > 0) {
         let totalPaid = loan.payments.reduce((s, p) => s + p.amount, 0);
         const installments = await prisma.loanInstallment.findMany({
@@ -187,7 +300,6 @@ export async function bootstrapExistingLoans() {
               },
             });
             totalPaid = 0;
-          }
         }
       }
     }
@@ -195,19 +307,94 @@ export async function bootstrapExistingLoans() {
 }
 
 /**
- * Get Today's Collection Visit List (strictly based on scheduled collection date)
+ * Format a Prisma LoanInstallment into a unified InstallmentScheduleItem
  */
-export async function getTodayCollectionList(dateStr?: string) {
+function mapInstallmentToItem(
+  inst: any,
+  referenceDateStr: string
+): InstallmentScheduleItem {
+  const dueYMD = toISTDateString(inst.dueDate);
+  const isPast = dueYMD < referenceDateStr;
+  const isFullyPaid = inst.paidAmount >= inst.installmentAmount;
+  const isPartial = inst.paidAmount > 0 && !isFullyPaid;
+  const pendingAmount = Math.max(0, inst.installmentAmount - inst.paidAmount);
+
+  let status: "PENDING" | "PAID" | "PARTIAL" | "OVERDUE" = "PENDING";
+  let statusRaw: "PENDING" | "COLLECTED" | "PARTIALLY_PAID" | "OVERDUE" = "PENDING";
+
+  if (isFullyPaid) {
+    status = "PAID";
+    statusRaw = "COLLECTED";
+  } else if (isPartial) {
+    status = "PARTIAL";
+    statusRaw = "PARTIALLY_PAID";
+  } else if (isPast) {
+    status = "OVERDUE";
+    statusRaw = "OVERDUE";
+  } else {
+    status = "PENDING";
+    statusRaw = "PENDING";
+  }
+
+  return {
+    id: inst.id,
+    installmentId: inst.id,
+    loanId: inst.loanId,
+    loanNo: inst.loan?.loanNo || "",
+    customerId: inst.customerId,
+    customerName: inst.customer?.name || "",
+    customerCode: inst.customer?.customerCode || "",
+    mobile: inst.customer?.mobile || "",
+    customerMobile: inst.customer?.mobile || "",
+    address: inst.customer?.address || inst.customer?.city || "-",
+    installmentNumber: inst.installmentNumber,
+    installmentNo: inst.installmentNumber,
+    scheduledCollectionDate: dueYMD,
+    dueDate: formatISTDisplay(inst.dueDate),
+    dueDateYMD: dueYMD,
+    amountToCollect: inst.installmentAmount,
+    amount: inst.installmentAmount,
+    dueAmount: inst.installmentAmount,
+    installmentAmount: inst.installmentAmount,
+    principal: inst.principalPortion,
+    principalPortion: inst.principalPortion,
+    interest: inst.interestPortion,
+    interestPortion: inst.interestPortion,
+    paidAmount: inst.paidAmount,
+    principalPaid: inst.principalPaid || 0,
+    interestPaid: inst.interestPaid || 0,
+    remainingAmount: pendingAmount,
+    pendingAmount,
+    balance: pendingAmount,
+    balanceAmount: pendingAmount,
+    status,
+    statusRaw,
+    actualPaymentDate: inst.actualPaymentDate ? toISTDateString(inst.actualPaymentDate) : null,
+    paymentMethod: inst.paymentMethod || null,
+    notes: inst.notes || null,
+  };
+}
+
+/**
+ * Authoritative Central Collection Schedule & Status Engine
+ * Serves Desktop EXE, Web Admin, Admin Android APK, and Partner Android APK
+ */
+export async function getCollectionSchedule(
+  dateStr?: string,
+  options?: { q?: string; tab?: string }
+): Promise<CollectionScheduleResponse> {
   await bootstrapExistingLoans();
 
-  const targetDateStr = dateStr || formatDateToYMD(new Date());
-  const { start, end } = getDayRange(targetDateStr);
+  const targetDateStr = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : getTodayIST();
+  const range = getISTDayRange(targetDateStr);
 
-  const installments = await prisma.loanInstallment.findMany({
+  // 1. Fetch Today's Due Installments
+  const dueInstallments = await prisma.loanInstallment.findMany({
     where: {
+      loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
       dueDate: {
-        gte: start,
-        lte: end,
+        gte: range.start,
+        lte: range.end,
       },
     },
     include: {
@@ -220,71 +407,30 @@ export async function getTodayCollectionList(dateStr?: string) {
     ],
   });
 
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-
-  const items: InstallmentScheduleItem[] = installments.map((inst) => {
-    let status: "PENDING" | "COLLECTED" | "PARTIALLY_PAID" | "OVERDUE" = "PENDING";
-    if (inst.paidAmount >= inst.installmentAmount) {
-      status = "COLLECTED";
-    } else if (inst.paidAmount > 0) {
-      status = "PARTIALLY_PAID";
-    } else if (new Date(inst.dueDate) < now) {
-      status = "OVERDUE";
-    }
-
-    const remainingAmount = Math.max(0, inst.installmentAmount - inst.paidAmount);
-
-    return {
-      id: inst.id,
-      loanId: inst.loanId,
-      loanNo: inst.loan.loanNo,
-      customerId: inst.customerId,
-      customerName: inst.customer.name,
-      mobile: inst.customer.mobile,
-      address: inst.customer.address || inst.customer.city || "-",
-      installmentNumber: inst.installmentNumber,
-      scheduledCollectionDate: formatDateToYMD(new Date(inst.dueDate)),
-      amountToCollect: inst.installmentAmount,
-      principal: inst.principalPortion,
-      interest: inst.interestPortion,
-      paidAmount: inst.paidAmount,
-      remainingAmount,
-      status,
-      actualPaymentDate: inst.actualPaymentDate ? formatDateToYMD(new Date(inst.actualPaymentDate)) : null,
-    };
+  // 2. Fetch Payments Collected Today
+  const todayPayments = await prisma.loanPayment.findMany({
+    where: {
+      date: {
+        gte: range.start,
+        lte: range.end,
+      },
+    },
+    include: {
+      customer: true,
+      loan: true,
+    },
+    orderBy: { date: "desc" },
   });
 
-  const totalCustomers = items.length;
-  const totalAmountToCollect = items.reduce((s, i) => s + i.amountToCollect, 0);
-  const totalCollected = items.reduce((s, i) => s + i.paidAmount, 0);
-  const totalRemaining = items.reduce((s, i) => s + i.remainingAmount, 0);
-
-  return {
-    date: targetDateStr,
-    totalCustomers,
-    totalAmountToCollect,
-    totalCollected,
-    totalRemaining,
-    items,
-  };
-}
-
-/**
- * Get Pending Collection List (Customer-Wise Pending View for Selected Date)
- */
-export async function getPendingCollectionList(dateStr?: string) {
-  await bootstrapExistingLoans();
-
-  const targetDateStr = dateStr || formatDateToYMD(new Date());
-  const { start, end } = getDayRange(targetDateStr);
-
-  const installments = await prisma.loanInstallment.findMany({
+  // 3. Fetch Overdue Installments (due strictly before today and not fully paid)
+  const overdueInstallments = await prisma.loanInstallment.findMany({
     where: {
       loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
       dueDate: {
-        gte: start,
-        lte: end,
+        lt: range.start,
+      },
+      paidAmount: {
+        lt: prisma.loanInstallment.fields.installmentAmount,
       },
       status: { not: "COLLECTED" },
     },
@@ -293,123 +439,194 @@ export async function getPendingCollectionList(dateStr?: string) {
       loan: true,
     },
     orderBy: [
+      { dueDate: "asc" },
       { customer: { name: "asc" } },
-      { installmentNumber: "asc" },
     ],
   });
 
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
+  // 4. Count future installments
+  const futureCount = await prisma.loanInstallment.count({
+    where: {
+      loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
+      dueDate: {
+        gt: range.end,
+      },
+    },
+  });
 
-  // Group uncollected/partially-paid installments by customerId
-  const customerMap = new Map<
-    string,
-    {
-      customerId: string;
-      customerName: string;
-      mobile: string;
-      address: string;
-      loansMap: Map<string, string>;
-      installments: PendingInstallmentItem[];
-    }
-  >();
+  // Transform items
+  const todayDue: InstallmentScheduleItem[] = dueInstallments.map((inst) =>
+    mapInstallmentToItem(inst, targetDateStr)
+  );
 
-  for (const inst of installments) {
-    const pendingAmount = Math.max(0, inst.installmentAmount - inst.paidAmount);
-    if (pendingAmount <= 0) continue; // Exclude if already fully collected
+  // TAB 2: Today's Pending = Installments due today where paidAmount < installmentAmount
+  const todayPending: InstallmentScheduleItem[] = todayDue.filter((item) => item.pendingAmount > 0);
 
-    let status: "PENDING" | "PARTIALLY_PAID" | "OVERDUE" = "PENDING";
-    if (inst.paidAmount > 0) {
-      status = "PARTIALLY_PAID";
-    } else if (new Date(inst.dueDate) < now) {
-      status = "OVERDUE";
-    }
+  // TAB 3: Collected Today = Payments recorded on target date
+  const collectedToday: CollectedTodayPaymentItem[] = todayPayments.map((p) => {
+    // Parse installment number if noted in description or notes
+    let instNo: number | null = null;
+    const match = (p.notes || "").match(/#(\d+)/);
+    if (match) instNo = Number(match[1]);
 
-    const item: PendingInstallmentItem = {
-      id: inst.id,
-      loanId: inst.loanId,
-      loanNo: inst.loan.loanNo,
-      customerId: inst.customerId,
-      customerName: inst.customer.name,
-      mobile: inst.customer.mobile,
-      address: inst.customer.address || inst.customer.city || "-",
-      installmentNumber: inst.installmentNumber,
-      dueDate: formatDateToYMD(new Date(inst.dueDate)),
-      expectedAmount: inst.installmentAmount,
-      collectedAmount: inst.paidAmount,
-      pendingAmount,
-      principal: inst.principalPortion,
-      interest: inst.interestPortion,
-      status,
+    return {
+      id: p.id,
+      paymentNo: p.paymentNo,
+      loanId: p.loanId,
+      loanNo: p.loan?.loanNo || "",
+      customerId: p.customerId,
+      customerName: p.customer?.name || "",
+      customerCode: (p.customer as any)?.customerCode || "",
+      mobile: p.customer?.mobile || "",
+      installmentNumber: instNo,
+      installmentNo: instNo,
+      collectionDate: formatISTDateTime(p.date),
+      date: toISTDateString(p.date),
+      amount: p.amount,
+      amountCollected: p.amount,
+      principalPortion: p.principalPortion,
+      interestPortion: p.interestPortion,
+      paymentMethod: p.paymentMethod,
+      status: "PAID",
+      notes: p.notes,
     };
+  });
 
-    if (!customerMap.has(inst.customerId)) {
-      customerMap.set(inst.customerId, {
-        customerId: inst.customerId,
-        customerName: inst.customer.name,
-        mobile: inst.customer.mobile,
-        address: inst.customer.address || inst.customer.city || "-",
-        loansMap: new Map<string, string>(),
+  const overdue: InstallmentScheduleItem[] = overdueInstallments.map((inst) =>
+    mapInstallmentToItem(inst, targetDateStr)
+  );
+
+  // Reconciled Financial Totals
+  const todayDueAmount = todayDue.reduce((s, i) => s + i.dueAmount, 0);
+  const todayDueCount = todayDue.length;
+
+  const todayCollectedOnDue = todayDue.reduce((s, i) => s + i.paidAmount, 0);
+  const todayPendingAmount = todayPending.reduce((s, i) => s + i.pendingAmount, 0);
+  const todayPendingCount = todayPending.length;
+
+  const todayCollectedAmount = collectedToday.reduce((s, p) => s + p.amount, 0);
+  const todayCollectedCount = collectedToday.length;
+
+  const overdueAmount = overdue.reduce((s, i) => s + i.pendingAmount, 0);
+  const overdueCount = overdue.length;
+
+  // Due = Collected On Due + Pending On Due
+  const reconciled = Math.abs(todayDueAmount - (todayCollectedOnDue + todayPendingAmount)) < 0.01;
+
+  // Build Customer-Wise Grouping for pending collections (used by expandable UI)
+  const customerMap = new Map<string, CustomerPendingSummary>();
+
+  for (const item of todayPending) {
+    if (!customerMap.has(item.customerId)) {
+      customerMap.set(item.customerId, {
+        customerId: item.customerId,
+        customerName: item.customerName,
+        customerCode: item.customerCode,
+        mobile: item.mobile,
+        address: item.address,
+        loans: [],
+        loanNumbers: item.loanNo,
+        pendingInstallmentsCount: 0,
+        totalExpectedAmount: 0,
+        totalCollectedAmount: 0,
+        totalPendingAmount: 0,
+        status: item.status === "PARTIAL" ? "PARTIAL" : "PENDING",
         installments: [],
       });
     }
 
-    const group = customerMap.get(inst.customerId)!;
-    group.loansMap.set(inst.loanId, inst.loan.loanNo);
-    group.installments.push(item);
-  }
-
-  const customers: CustomerPendingSummary[] = [];
-  let allPendingInstallmentsCount = 0;
-  let allPendingAmount = 0;
-
-  for (const group of customerMap.values()) {
-    group.installments.sort((a, b) => a.installmentNumber - b.installmentNumber);
-
-    const totalExpectedAmount = group.installments.reduce((s, i) => s + i.expectedAmount, 0);
-    const totalCollectedAmount = group.installments.reduce((s, i) => s + i.collectedAmount, 0);
-    const totalPendingAmount = group.installments.reduce((s, i) => s + i.pendingAmount, 0);
-
-    let status: "PENDING" | "PARTIALLY_PAID" | "OVERDUE" = "PENDING";
-    if (group.installments.some((i) => i.status === "OVERDUE")) {
-      status = "OVERDUE";
-    } else if (group.installments.some((i) => i.status === "PARTIALLY_PAID")) {
-      status = "PARTIALLY_PAID";
+    const group = customerMap.get(item.customerId)!;
+    if (!group.loans.some((l) => l.loanId === item.loanId)) {
+      group.loans.push({ loanId: item.loanId, loanNo: item.loanNo });
+      group.loanNumbers = group.loans.map((l) => l.loanNo).join(", ");
     }
 
-    const loans = Array.from(group.loansMap.entries()).map(([loanId, loanNo]) => ({
-      loanId,
-      loanNo,
-    }));
-    const loanNumbers = loans.map((l) => l.loanNo).join(", ");
+    const pendingItem: PendingInstallmentItem = {
+      ...item,
+      expectedAmount: item.dueAmount,
+      collectedAmount: item.paidAmount,
+    };
 
-    customers.push({
-      customerId: group.customerId,
-      customerName: group.customerName,
-      mobile: group.mobile,
-      address: group.address,
-      loans,
-      loanNumbers,
-      pendingInstallmentsCount: group.installments.length,
-      totalExpectedAmount,
-      totalCollectedAmount,
-      totalPendingAmount,
-      status,
-      installments: group.installments,
-    });
+    group.installments.push(pendingItem);
+    group.pendingInstallmentsCount += 1;
+    group.totalExpectedAmount += item.dueAmount;
+    group.totalCollectedAmount += item.paidAmount;
+    group.totalPendingAmount += item.pendingAmount;
 
-    allPendingInstallmentsCount += group.installments.length;
-    allPendingAmount += totalPendingAmount;
+    if (item.status === "OVERDUE") group.status = "OVERDUE";
+    else if (item.status === "PARTIAL" && group.status !== "OVERDUE") group.status = "PARTIAL";
   }
 
-  customers.sort((a, b) => a.customerName.localeCompare(b.customerName));
+  const customers = Array.from(customerMap.values()).sort((a, b) =>
+    a.customerName.localeCompare(b.customerName)
+  );
+
+  // Optional search filtering
+  const q = (options?.q || "").trim().toLowerCase();
+  const applyFilter = <T extends { customerName: string; loanNo: string; mobile: string }>(
+    list: T[]
+  ): T[] => {
+    if (!q) return list;
+    return list.filter(
+      (item) =>
+        item.customerName.toLowerCase().includes(q) ||
+        item.loanNo.toLowerCase().includes(q) ||
+        item.mobile.includes(q)
+    );
+  };
 
   return {
+    success: true,
     date: targetDateStr,
-    totalPendingCustomers: customers.length,
-    totalPendingInstallments: allPendingInstallmentsCount,
-    totalPendingAmount: allPendingAmount,
+    dateDisplay: formatISTDisplay(range.start),
+    summary: {
+      todayDueAmount,
+      todayDueCount,
+      todayCollectedAmount,
+      todayCollectedCount,
+      todayPendingAmount,
+      todayPendingCount,
+      todayCollectedOnDue,
+      overdueAmount,
+      overdueCount,
+      futureCount,
+      reconciled,
+    },
+    todayDue: applyFilter(todayDue),
+    todayPending: applyFilter(todayPending),
+    collectedToday: applyFilter(collectedToday),
+    overdue: applyFilter(overdue),
     customers,
+  };
+}
+
+/**
+ * Get Today's Collection Visit List (Tab 1 view & backward compatibility)
+ */
+export async function getTodayCollectionList(dateStr?: string) {
+  const schedule = await getCollectionSchedule(dateStr);
+  return {
+    date: schedule.date,
+    totalCustomers: schedule.summary.todayDueCount,
+    totalAmountToCollect: schedule.summary.todayDueAmount,
+    totalCollected: schedule.summary.todayCollectedOnDue,
+    totalRemaining: schedule.summary.todayPendingAmount,
+    items: schedule.todayDue,
+  };
+}
+
+/**
+ * Get Pending Collection List (Tab 2 view & backward compatibility)
+ */
+export async function getPendingCollectionList(dateStr?: string) {
+  const schedule = await getCollectionSchedule(dateStr);
+  return {
+    date: schedule.date,
+    totalPendingCustomers: schedule.customers.length,
+    totalPendingInstallments: schedule.summary.todayPendingCount,
+    totalPendingAmount: schedule.summary.todayPendingAmount,
+    items: schedule.todayPending,
+    customers: schedule.customers,
   };
 }
 
@@ -421,7 +638,7 @@ export async function recordCollectionForInstallment(data: {
   amount: number;
   principalPortion?: number;
   interestPortion?: number;
-  collectionDate: string; // YYYY-MM-DD
+  collectionDate?: string; // YYYY-MM-DD
   paymentMethod?: string;
   notes?: string;
 }) {
@@ -451,24 +668,26 @@ export async function recordCollectionForInstallment(data: {
   let iPortion = Number(interestPortion);
 
   if (isNaN(pPortion) || isNaN(iPortion) || pPortion + iPortion === 0) {
-    // Default split: proportional to installment schedule or interest first
+    // Proportional or interest first split
     const remInterest = Math.max(0, installment.interestPortion - installment.interestPaid);
     iPortion = Math.min(remInterest, amount);
     pPortion = amount - iPortion;
   }
 
-  // Parse actual collection date
+  // Authoritative collection timestamp in IST
   let paymentDate = new Date();
   if (collectionDate && /^\d{4}-\d{2}-\d{2}$/.test(collectionDate)) {
     const [y, m, d] = collectionDate.split("-").map(Number);
     const now = new Date();
-    paymentDate = new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds());
+    const utcMs = Date.UTC(y, m - 1, d, now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds());
+    paymentDate = new Date(utcMs);
   }
 
   const newPaidAmount = installment.paidAmount + amount;
-  const newStatus = newPaidAmount >= installment.installmentAmount ? "COLLECTED" : "PARTIALLY_PAID";
+  const isFullyPaid = newPaidAmount >= installment.installmentAmount;
+  const newStatus = isFullyPaid ? "COLLECTED" : "PARTIALLY_PAID";
 
-  // 1. Update Installment (PRESERVE scheduled dueDate!)
+  // 1. Update Installment
   const updatedInstallment = await prisma.loanInstallment.update({
     where: { id: installmentId },
     data: {
@@ -485,7 +704,7 @@ export async function recordCollectionForInstallment(data: {
   // 2. Update Loan outstanding balances
   const newPrincipalOutstanding = Math.max(0, loan.principalOutstanding - pPortion);
   const newInterestOutstanding = Math.max(0, loan.interestOutstanding - iPortion);
-  const isFullyPaid = newPrincipalOutstanding <= 0 && newInterestOutstanding <= 0;
+  const isLoanClosed = newPrincipalOutstanding <= 0 && newInterestOutstanding <= 0;
 
   await prisma.loan.update({
     where: { id: loan.id },
@@ -494,8 +713,8 @@ export async function recordCollectionForInstallment(data: {
       interestPaid: { increment: iPortion },
       principalOutstanding: newPrincipalOutstanding,
       interestOutstanding: newInterestOutstanding,
-      status: isFullyPaid ? "CLOSED" : loan.status,
-      closedAt: isFullyPaid ? new Date() : undefined,
+      status: isLoanClosed ? "CLOSED" : loan.status,
+      closedAt: isLoanClosed ? new Date() : undefined,
     },
   });
 
@@ -533,7 +752,7 @@ export async function recordCollectionForInstallment(data: {
       entity: "LOAN",
       entityId: loan.id,
       performedBy: "Admin",
-      details: `Collected ₹${amount} from ${installment.customer.name} for Installment #${installment.installmentNumber} of loan ${loan.loanNo}. Scheduled: ${formatDateToYMD(installment.dueDate)}, Actual Collection: ${formatDateToYMD(paymentDate)}, Status: ${newStatus}`,
+      details: `Collected ₹${amount} from ${installment.customer.name} for Installment #${installment.installmentNumber} of loan ${loan.loanNo}. Scheduled: ${toISTDateString(installment.dueDate)}, Actual Collection: ${toISTDateString(paymentDate)}, Status: ${isFullyPaid ? "PAID" : "PARTIAL"}`,
     },
   });
 
@@ -545,7 +764,7 @@ export async function recordCollectionForInstallment(data: {
     customerName: installment.customer.name,
     amount,
     date: paymentDate,
-    status: newStatus,
+    status: isFullyPaid ? "PAID" : "PARTIAL",
   });
 
   return { installment: updatedInstallment, payment };

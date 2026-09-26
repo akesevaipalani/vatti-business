@@ -59,6 +59,12 @@ interface DashboardKPIs {
 }
 
 interface DashboardToday {
+  todayDueAmount?: number;
+  todayDueCount?: number;
+  todayCollectedAmount?: number;
+  todayPendingAmount?: number;
+  todayPendingCustomers?: number;
+  todayPendingCount?: number;
   collection: number;
   expense: number;
   investment: number;
@@ -287,47 +293,103 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* TODAY'S FLASH METRICS BANNER */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-[11px] font-medium text-slate-500">{t.todayCollection}</div>
+      {/* TODAY'S FLASH METRICS BANNER - CLEARLY DISTINGUISHED & RECONCILED */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* 1. Today's Due Amount */}
+        <Link
+          href="/daily-collections?tab=today"
+          className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-300 dark:hover:border-emerald-700 transition group"
+        >
+          <div className="text-[11px] font-medium text-slate-500 group-hover:text-emerald-600 transition">
+            {t.todaysCollection}
+          </div>
+          <div className="text-base font-bold text-slate-900 dark:text-slate-100 mt-1 font-mono">
+            {formatCurrency(today.todayDueAmount ?? 0)}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5 truncate">
+            {today.todayDueCount ?? 0} {today.todayDueCount === 1 ? "installment" : "installments"} due
+          </div>
+        </Link>
+
+        {/* 2. Collected Today */}
+        <Link
+          href="/daily-collections?tab=collected"
+          className="p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 hover:border-emerald-400 transition group"
+        >
+          <div className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+            {t.collectedToday}
+          </div>
           <div className="text-base font-bold text-emerald-600 mt-1 font-mono">
-            {formatCurrency(today.collection)}
+            {formatCurrency(today.todayCollectedAmount ?? today.collection)}
           </div>
-        </div>
-        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-[11px] font-medium text-slate-500">{t.todayExpense}</div>
-          <div className="text-base font-bold text-rose-600 mt-1 font-mono">
-            {formatCurrency(today.expense)}
+          <div className="text-[10px] text-emerald-600/80 mt-0.5">
+            Received today
           </div>
-        </div>
-        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-[11px] font-medium text-slate-500">{t.todayProfit}</div>
+        </Link>
+
+        {/* 3. Pending Today */}
+        <Link
+          href="/daily-collections?tab=pending"
+          className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 hover:border-indigo-400 transition group"
+        >
+          <div className="text-[11px] font-medium text-indigo-700 dark:text-indigo-400">
+            {t.todaysPending}
+          </div>
           <div className="text-base font-bold text-indigo-600 mt-1 font-mono">
-            {formatCurrency(today.profit)}
+            {formatCurrency(today.todayPendingAmount ?? today.pendingCollections)}
           </div>
-        </div>
-        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-[11px] font-medium text-slate-500">{t.todayInvestment}</div>
-          <div className="text-base font-bold text-teal-600 mt-1 font-mono">
-            {formatCurrency(today.investment)}
+          <div className="text-[10px] text-indigo-600/80 mt-0.5 truncate">
+            {today.todayPendingCustomers ?? 0} {today.todayPendingCustomers === 1 ? "customer" : "customers"} ({today.todayPendingCount ?? 0} inst)
           </div>
-        </div>
-        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-[11px] font-medium text-slate-500">{t.overdueAmounts}</div>
-          <div className="text-base font-bold text-amber-600 mt-1 font-mono">
+        </Link>
+
+        {/* 4. Overdue Amount */}
+        <Link
+          href="/daily-collections?tab=overdue"
+          className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 hover:border-rose-400 transition group"
+        >
+          <div className="text-[11px] font-medium text-rose-700 dark:text-rose-400">
+            {t.overdueSchedule}
+          </div>
+          <div className="text-base font-bold text-rose-600 mt-1 font-mono">
             {formatCurrency(today.overdueAmounts)}
           </div>
-          <div className="text-[10px] text-amber-500 font-medium">
+          <div className="text-[10px] text-rose-600/80 mt-0.5 truncate">
             {today.overdueCount} {today.overdueCount === 1 ? "loan" : "loans"} overdue
           </div>
-        </div>
-        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
-          <div className="text-[11px] font-medium text-slate-500">{t.pendingCollections}</div>
-          <div className="text-base font-bold text-blue-600 mt-1 font-mono">
-            {formatCurrency(today.pendingCollections)}
+        </Link>
+
+        {/* 5. Today's Expense */}
+        <Link
+          href="/expenses"
+          className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-rose-300 transition group"
+        >
+          <div className="text-[11px] font-medium text-slate-500 group-hover:text-rose-600 transition">
+            {t.todayExpense}
           </div>
-        </div>
+          <div className="text-base font-bold text-slate-700 dark:text-slate-300 mt-1 font-mono">
+            {formatCurrency(today.expense)}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            Operational costs
+          </div>
+        </Link>
+
+        {/* 6. Today's Profit */}
+        <Link
+          href="/reports?type=PL"
+          className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-teal-300 transition group"
+        >
+          <div className="text-[11px] font-medium text-slate-500 group-hover:text-teal-600 transition">
+            {t.todayProfit}
+          </div>
+          <div className="text-base font-bold text-teal-600 mt-1 font-mono">
+            {formatCurrency(today.profit)}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            Net earnings
+          </div>
+        </Link>
       </div>
 
       {/* 13 DETAILED FINANCIAL KPI CARDS GRID */}

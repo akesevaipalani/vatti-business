@@ -31,6 +31,7 @@ export default function NewLoanPage() {
   const { t, formatCurrency, formatDate } = useLanguage();
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [showScheduleModal, setShowScheduleModal] = useState(false);
 
@@ -235,21 +236,39 @@ export default function NewLoanPage() {
         payload.totalInstallments = Number(totalInstallments) || 10;
       }
 
-      const res = await fetch("/api/loans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
 
-      if (res.ok) {
-        const data = await res.json();
-        router.push(`/loans/${data.loan.id}`);
-      } else {
-        const d = await res.json();
-        setErrorMsg(d.error || "Failed to create loan");
+      try {
+        const res = await fetch("/api/loans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data = await res.json();
+          setSubmitSuccess(true);
+          setTimeout(() => {
+            router.push(`/loans/${data.loan.id}`);
+          }, 600);
+        } else {
+          const d = await res.json().catch(() => ({}));
+          setErrorMsg(d.error ? `Loan creation failed: ${d.error}` : "Loan creation failed. Please check details.");
+        }
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        if (fetchErr?.name === "AbortError") {
+          setErrorMsg("Loan creation timed out. Please check Loans before retrying.");
+        } else {
+          setErrorMsg(fetchErr instanceof Error ? `Loan creation failed: ${fetchErr.message}` : (t.errorOccurred || "Failed to create loan"));
+        }
       }
-    } catch {
-      setErrorMsg(t.errorOccurred);
+    } catch (err: any) {
+      setErrorMsg(err instanceof Error ? `Loan creation failed: ${err.message}` : (t.errorOccurred || "Failed to create loan"));
     } finally {
       setLoading(false);
     }
@@ -271,8 +290,14 @@ export default function NewLoanPage() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {errorMsg && (
-          <div className="p-3 rounded-lg bg-rose-50 text-rose-600 text-xs font-semibold">
-            {errorMsg}
+          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 text-xs font-semibold flex items-center justify-between gap-3">
+            <span>{errorMsg}</span>
+            <Link
+              href="/loans"
+              className="underline text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 whitespace-nowrap"
+            >
+              Check Loans
+            </Link>
           </div>
         )}
 
@@ -1149,11 +1174,21 @@ export default function NewLoanPage() {
 
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2 transition disabled:opacity-50"
+                disabled={loading || submitSuccess}
+                className={`w-full py-3 px-4 rounded-xl text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition ${
+                  submitSuccess
+                    ? "bg-emerald-600 shadow-emerald-600/20"
+                    : "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20 disabled:opacity-50"
+                }`}
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>{loading ? "Disbursing Loan..." : "DISBURSE LOAN NOW"}</span>
+                <span>
+                  {submitSuccess
+                    ? "Loan Created Successfully"
+                    : loading
+                    ? "Disbursing Loan..."
+                    : "DISBURSE LOAN NOW"}
+                </span>
               </button>
             </div>
           </div>

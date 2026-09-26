@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getISTDayRange } from "@/lib/date";
 
 export async function getDashboardFinancialStats() {
   const [
@@ -86,26 +87,56 @@ export async function getDashboardFinancialStats() {
   const availableCash = cashAccount?.currentBalance || 0;
   const bankBalance = bankAccounts.reduce((sum, b) => sum + b.currentBalance, 0);
 
-  // Today's Stats
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  // Today's Stats in Authoritative IST
+  const todayRange = getISTDayRange();
 
-  const todayPayments = payments.filter((p) => new Date(p.date) >= todayStart);
-  const todayCollection = todayPayments.reduce((sum, p) => sum + p.amount, 0);
-  const todayExpenses = expenses.filter((e) => new Date(e.date) >= todayStart).reduce((sum, e) => sum + e.amount, 0);
-  const todayInvestment = investments.filter((i) => new Date(i.createdAt) >= todayStart).reduce((sum, i) => sum + i.amount, 0);
-  const todayWithdrawal = withdrawals.filter((w) => new Date(w.createdAt) >= todayStart).reduce((sum, w) => sum + w.amount, 0);
-  const todayProfit = todayCollection - todayExpenses;
+  const [todayInstallments, todayPaymentsList] = await Promise.all([
+    prisma.loanInstallment.findMany({
+      where: {
+        loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
+        dueDate: { gte: todayRange.start, lte: todayRange.end },
+      },
+      select: { installmentAmount: true, paidAmount: true, customerId: true },
+    }),
+    prisma.loanPayment.findMany({
+      where: { date: { gte: todayRange.start, lte: todayRange.end } },
+      select: { amount: true, principalPortion: true, interestPortion: true },
+    }),
+  ]);
 
-  // Overdue Loans
-  const now = new Date();
-  const overdueLoans = loans.filter(
-    (l) => l.status === "ACTIVE" && l.dueDate && new Date(l.dueDate) < now
-  );
-  const overdueAmounts = overdueLoans.reduce(
-    (sum, l) => sum + l.principalOutstanding + l.interestOutstanding,
+  const todayDueAmount = todayInstallments.reduce((sum, i) => sum + i.installmentAmount, 0);
+  const todayDueCount = todayInstallments.length;
+  const todayCollectedOnDue = todayInstallments.reduce((sum, i) => sum + i.paidAmount, 0);
+
+  const todayPendingInstallments = todayInstallments.filter((i) => i.paidAmount < i.installmentAmount);
+  const todayPendingAmount = todayPendingInstallments.reduce(
+    (sum, i) => sum + Math.max(0, i.installmentAmount - i.paidAmount),
     0
   );
+  const todayPendingCustomers = new Set(todayPendingInstallments.map((i) => i.customerId)).size;
+
+  const todayCollection = todayPaymentsList.reduce((sum, p) => sum + p.amount, 0);
+  const todayExpenses = expenses.filter((e) => new Date(e.date) >= todayRange.start && new Date(e.date) <= todayRange.end).reduce((sum, e) => sum + e.amount, 0);
+  const todayInvestment = investments.filter((i) => new Date(i.createdAt) >= todayRange.start && new Date(i.createdAt) <= todayRange.end).reduce((sum, i) => sum + i.amount, 0);
+  const todayWithdrawal = withdrawals.filter((w) => new Date(w.createdAt) >= todayRange.start && new Date(w.createdAt) <= todayRange.end).reduce((sum, w) => sum + w.amount, 0);
+  const todayProfit = todayCollection - todayExpenses;
+
+  // Overdue Installments / Loans (Due strictly before today)
+  const overdueInstallments = await prisma.loanInstallment.findMany({
+    where: {
+      loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
+      dueDate: { lt: todayRange.start },
+      paidAmount: { lt: prisma.loanInstallment.fields.installmentAmount },
+      status: { not: "COLLECTED" },
+    },
+    select: { installmentAmount: true, paidAmount: true, loanId: true },
+  });
+
+  const overdueAmounts = overdueInstallments.reduce(
+    (sum, i) => sum + Math.max(0, i.installmentAmount - i.paidAmount),
+    0
+  );
+  const overdueLoansCount = new Set(overdueInstallments.map((i) => i.loanId)).size;
 
   // Monthly breakdown for charts (Last 6 Months)
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -161,14 +192,22 @@ export async function getDashboardFinancialStats() {
       bankBalance,
     },
     today: {
+      todayDueAmount,
+      todayDueCount,
       collection: todayCollection,
+      todayCollection,
+      todayCollectedAmount: todayCollection,
+      todayCollectedOnDue,
+      pendingCollections: todayPendingAmount,
+      todayPendingAmount,
+      todayPendingCustomers,
+      todayPendingCount: todayPendingInstallments.length,
       expense: todayExpenses,
       investment: todayInvestment,
       withdrawal: todayWithdrawal,
       profit: todayProfit,
-      pendingCollections: totalAmountReceivable,
       overdueAmounts,
-      overdueCount: overdueLoans.length,
+      overdueCount: overdueLoansCount,
     },
     charts: {
       monthly: monthlyChartData,

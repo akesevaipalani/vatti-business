@@ -18,13 +18,7 @@ import {
 import { useLanguage } from "@/context/LanguageContext";
 import { CollectionReceiptModal, ReceiptData } from "@/components/documents/CollectionReceiptModal";
 
-const getTodayDateStr = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+import { getTodayIST, isPastDateIST } from "@/lib/date";
 
 interface GuarantorItem {
   id: string;
@@ -126,7 +120,7 @@ export default function LoanDetailPage({
 
   // Payment Modal
   const [payModal, setPayModal] = useState(false);
-  const [collectionDate, setCollectionDate] = useState(() => getTodayDateStr());
+  const [collectionDate, setCollectionDate] = useState(() => getTodayIST());
   const [amount, setAmount] = useState("");
   const [principalPortion, setPrincipalPortion] = useState("");
   const [interestPortion, setInterestPortion] = useState("");
@@ -175,7 +169,7 @@ export default function LoanDetailPage({
     setPaymentMethod("CASH");
     setNotes("Installment Payment");
     setErrorMsg("");
-    setCollectionDate(getTodayDateStr());
+    setCollectionDate(getTodayIST());
     setPayModal(true);
   };
 
@@ -606,7 +600,7 @@ ABC FINANCE | Contact: +91 96008 71898`;
                   const inst = loan.installments?.find((i) => i.installmentNumber === item.installmentNumber);
                   const isPaid = inst?.status === "COLLECTED";
                   const isPartial = inst?.status === "PARTIALLY_PAID";
-                  const isOverdue = inst?.status === "OVERDUE" || (inst ? (new Date(inst.dueDate) < new Date() && !isPaid) : false);
+                  const isOverdue = inst?.status === "OVERDUE" || (inst ? (isPastDateIST(inst.dueDate) && !isPaid) : false);
                   const paidAmt = inst?.paidAmount || 0;
                   const balanceAmt = inst ? Math.max(0, item.installmentAmount - paidAmt) : item.installmentAmount;
 

@@ -46,6 +46,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [waLoading, setWaLoading] = useState(false);
   const [waStatus, setWaStatus] = useState<"IDLE" | "PENDING" | "SENT" | "FAILED" | "MANUAL">("IDLE");
   const [waMessage, setWaMessage] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
 
   if (!isOpen || !payment) return null;
 
@@ -83,12 +86,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handleDownloadPdf = async () => {
     try {
       setDownloading(true);
+      setDownloadError(null);
+      setDownloadSuccess(null);
+      setPrintError(null);
       const data = buildReceiptData();
       const doc = await generateCollectionReceiptPdf(data);
       const safeNo = receiptNumber.replace(/[^a-zA-Z0-9_-]/g, "_");
-      downloadPdf(doc, `${safeNo}_Receipt.pdf`);
+      await downloadPdf(doc, `${safeNo}_Receipt.pdf`);
+      setDownloadSuccess(
+        language === "ta"
+          ? "ரசீது PDF வெற்றிகரமாக உருவாக்கப்பட்டு திறக்கப்பட்டது!"
+          : "Receipt PDF generated and opened successfully!"
+      );
     } catch (err: unknown) {
       console.error("PDF download failed:", err);
+      const msg = err instanceof Error ? err.message : "ரசீது பதிவிறக்கம் தோல்வி / PDF download failed";
+      setDownloadError(msg);
       // Fallback to server download URL
       if (payment.id) {
         window.open(api.getCollectionReceiptDownloadUrl(payment.id), "_blank");
@@ -101,12 +114,16 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const handlePrintPdf = async () => {
     try {
       setPrinting(true);
+      setPrintError(null);
+      setDownloadError(null);
       const data = buildReceiptData();
       const doc = await generateCollectionReceiptPdf(data);
-      printPdf(doc);
+      const safeNo = receiptNumber.replace(/[^a-zA-Z0-9_-]/g, "_");
+      await printPdf(doc, `${safeNo}_Receipt.pdf`);
     } catch (err: unknown) {
       console.error("Print failed:", err);
-      window.print();
+      const msg = err instanceof Error ? err.message : "அச்சு தோல்வி / Printing failed";
+      setPrintError(msg);
     } finally {
       setPrinting(false);
     }
@@ -294,6 +311,57 @@ ABC FINANCE | Contact: +91 96008 71898`;
                 {language === "ta" ? "மீண்டும் முயற்சி" : "RETRY"}
               </button>
             )}
+          </div>
+        )}
+
+        {/* PDF Download Success Banner */}
+        {downloadSuccess && (
+          <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+              <span>{downloadSuccess}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDownloadSuccess(null)}
+              className="text-[11px] font-bold text-emerald-600 underline ml-2"
+            >
+              OK
+            </button>
+          </div>
+        )}
+
+        {/* PDF Download Error Banner */}
+        {downloadError && (
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+              <span>{downloadError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              className="text-[11px] font-bold text-red-600 underline ml-2"
+            >
+              {language === "ta" ? "மீண்டும் முயற்சி" : "Retry"}
+            </button>
+          </div>
+        )}
+
+        {/* Print Error Banner */}
+        {printError && (
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+              <span>{printError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handlePrintPdf}
+              className="text-[11px] font-bold text-red-600 underline ml-2"
+            >
+              {language === "ta" ? "மீண்டும் முயற்சி" : "Retry"}
+            </button>
           </div>
         )}
 

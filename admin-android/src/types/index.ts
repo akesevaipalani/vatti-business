@@ -126,6 +126,7 @@ export interface LoanDetail {
   totalInstallments: number;
   installmentAmount: number;
   totalPayable: number;
+  customerReceives?: number;
   principalOutstanding: number;
   interestOutstanding: number;
   principalPaid: number;
@@ -162,20 +163,88 @@ export interface LoanPayment {
 }
 
 export interface TodayCollectionItem {
+  id?: string;
   installmentId: string;
   loanId: string;
   loanNo: string;
+  customerId?: string;
   customerName: string;
+  customerCode?: string;
+  mobile?: string;
   customerMobile: string;
+  address?: string;
   installmentNo: number;
+  installmentNumber?: number;
   amount: number;
+  dueAmount?: number;
+  installmentAmount?: number;
+  paidAmount?: number;
+  balance?: number;
+  balanceAmount?: number;
+  pendingAmount?: number;
+  remainingAmount?: number;
   principalPortion: number;
   interestPortion: number;
+  principal?: number;
+  interest?: number;
   dueDate: string;
-  status: "PENDING" | "PAID";
+  dueDateYMD?: string;
+  status: "PENDING" | "PAID" | "PARTIAL" | "OVERDUE" | "COLLECTED" | "PARTIALLY_PAID" | string;
+  statusRaw?: string;
+  actualPaymentDate?: string | null;
+  paymentMethod?: string | null;
 }
 
-export interface TodayCollectionListResponse {
+export interface CollectedTodayPaymentItem {
+  id: string;
+  paymentNo: string;
+  loanId: string;
+  loanNo: string;
+  customerId: string;
+  customerName: string;
+  customerCode?: string;
+  mobile: string;
+  installmentNumber?: number | null;
+  installmentNo?: number | null;
+  collectionDate: string;
+  date: string;
+  amount: number;
+  amountCollected: number;
+  principalPortion: number;
+  interestPortion: number;
+  paymentMethod: string;
+  status: "PAID";
+  notes?: string | null;
+}
+
+export interface CollectionScheduleResponse {
+  date: string;
+  dateDisplay: string;
+  summary: {
+    todayDueAmount: number;
+    todayDueCount: number;
+    todayCollectedAmount: number;
+    todayCollectedCount: number;
+    todayPendingAmount: number;
+    todayPendingCount: number;
+    todayCollectedOnDue: number;
+    overdueAmount: number;
+    overdueCount: number;
+    futureCount: number;
+    reconciled: boolean;
+  };
+  todayDue: TodayCollectionItem[];
+  todayPending: TodayCollectionItem[];
+  collectedToday: CollectedTodayPaymentItem[];
+  overdue: TodayCollectionItem[];
+  totalCustomers?: number;
+  totalAmountToCollect?: number;
+  totalCollected?: number;
+  totalRemaining?: number;
+  items?: TodayCollectionItem[];
+}
+
+export interface TodayCollectionListResponse extends CollectionScheduleResponse {
   date: string;
   totalAmountToCollect: number;
   totalCollected: number;

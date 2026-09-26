@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import crypto from "crypto";
 
 export const CHART_OF_ACCOUNTS = [
   // Assets
@@ -29,14 +30,19 @@ export const CHART_OF_ACCOUNTS = [
   { code: "5030", name: "Cost of Goods Sold / Purchases", type: "EXPENSE" },
 ];
 
+let defaultAccountsEnsured = false;
 export async function ensureDefaultAccounts() {
-  for (const acct of CHART_OF_ACCOUNTS) {
-    const existing = await prisma.ledgerAccount.findUnique({
-      where: { code: acct.code },
-    });
-    if (!existing) {
-      await prisma.ledgerAccount.create({
-        data: {
+  if (defaultAccountsEnsured) return;
+
+  const existing = await prisma.ledgerAccount.findMany({ select: { code: true } });
+  const existingCodes = new Set(existing.map((a) => a.code));
+  const missing = CHART_OF_ACCOUNTS.filter((a) => !existingCodes.has(a.code));
+  if (missing.length > 0) {
+    for (const acct of missing) {
+      await prisma.ledgerAccount.upsert({
+        where: { code: acct.code },
+        update: {},
+        create: {
           code: acct.code,
           name: acct.name,
           type: acct.type,
@@ -60,6 +66,7 @@ export async function ensureDefaultAccounts() {
       },
     });
   }
+  defaultAccountsEnsured = true;
 }
 
 interface PostingEntry {
@@ -108,41 +115,53 @@ export async function postTransaction(params: PostTransactionParams) {
     },
   });
 
-  for (const entry of params.entries) {
-    const account = await prisma.ledgerAccount.findUnique({
-      where: { code: entry.accountCode },
-    });
+  // Batch query all referenced accounts in a single round trip
+  const requiredCodes = Array.from(new Set(params.entries.map((e) => e.accountCode)));
+  const accounts = await prisma.ledgerAccount.findMany({
+    where: { code: { in: requiredCodes } },
+  });
+  const accountMap = new Map(accounts.map((a) => [a.code, a]));
 
-    if (!account) {
+  for (const entry of params.entries) {
+    if (!accountMap.has(entry.accountCode)) {
       throw new Error(`Ledger account with code ${entry.accountCode} not found.`);
     }
+  }
 
-    await prisma.ledgerEntry.create({
-      data: {
-        ledgerTransactionId: ledgerTxn.id,
-        accountId: account.id,
-        entryType: entry.entryType,
-        amount: entry.amount,
-      },
-    });
+  // Batch insert ledger entries
+  const entryRecords = params.entries.map((entry) => {
+    const account = accountMap.get(entry.accountCode)!;
+    return {
+      id: crypto.randomUUID(),
+      ledgerTransactionId: ledgerTxn.id,
+      accountId: account.id,
+      entryType: entry.entryType,
+      amount: entry.amount,
+    };
+  });
+  await prisma.ledgerEntry.createMany({ data: entryRecords });
 
-    // Update Account Balance
-    // For ASSET and EXPENSE: DEBIT increases balance (+), CREDIT decreases balance (-)
-    // For LIABILITY, EQUITY, REVENUE: CREDIT increases balance (+), DEBIT decreases balance (-)
+  // Compute aggregated delta per account to update balances efficiently
+  const deltaMap = new Map<string, number>();
+  for (const entry of params.entries) {
+    const account = accountMap.get(entry.accountCode)!;
     let balanceDelta = 0;
     if (account.type === "ASSET" || account.type === "EXPENSE") {
       balanceDelta = entry.entryType === "DEBIT" ? entry.amount : -entry.amount;
     } else {
       balanceDelta = entry.entryType === "CREDIT" ? entry.amount : -entry.amount;
     }
-
-    await prisma.ledgerAccount.update({
-      where: { id: account.id },
-      data: {
-        balance: { increment: balanceDelta },
-      },
-    });
+    deltaMap.set(account.id, (deltaMap.get(account.id) || 0) + balanceDelta);
   }
+
+  await Promise.all(
+    Array.from(deltaMap.entries()).map(([accountId, balanceDelta]) =>
+      prisma.ledgerAccount.update({
+        where: { id: accountId },
+        data: { balance: { increment: balanceDelta } },
+      })
+    )
+  );
 
   return ledgerTxn;
 }

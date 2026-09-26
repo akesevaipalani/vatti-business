@@ -81,6 +81,13 @@ export const en = {
   pendingCollections: "Pending Collections",
   pendingInterest: "Pending Interest",
   overdueAmounts: "Overdue Amounts",
+  todaysCollection: "Today's Collection",
+  todaysPending: "Today's Pending",
+  collectedToday: "Collected Today",
+  overdueSchedule: "Overdue",
+  dueAmount: "Due Amount",
+  collectedAmount: "Collected Amount",
+  pendingAmount: "Pending Amount",
 
   // Common Table & Form labels
   actions: "Actions",

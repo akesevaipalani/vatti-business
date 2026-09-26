@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getISTDayRange } from "@/lib/date";
 
 export async function GET() {
   try {
@@ -9,20 +10,20 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized access" }, { status: 401 });
     }
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayRange = getISTDayRange();
 
     const [
       todayPayments,
       allPayments,
       activeLoans,
-      pendingInstallments,
+      todayInstallments,
+      overdueInstallments,
       totalCustomers,
       partnerRecord,
     ] = await Promise.all([
       // Today's collections
       prisma.loanPayment.findMany({
-        where: { date: { gte: todayStart } },
+        where: { date: { gte: todayRange.start, lte: todayRange.end } },
         select: { amount: true },
       }),
       // Total collections to date
@@ -34,11 +35,20 @@ export async function GET() {
         where: { status: { in: ["ACTIVE", "OVERDUE"] } },
         select: { id: true, customerId: true },
       }),
-      // Pending scheduled installments
+      // Today's scheduled installments
       prisma.loanInstallment.findMany({
         where: {
           loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
-          status: { in: ["PENDING", "PARTIALLY_PAID", "OVERDUE"] },
+          dueDate: { gte: todayRange.start, lte: todayRange.end },
+        },
+        select: { installmentAmount: true, paidAmount: true, customerId: true },
+      }),
+      // Overdue installments
+      prisma.loanInstallment.findMany({
+        where: {
+          loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
+          dueDate: { lt: todayRange.start },
+          status: { not: "COLLECTED" },
         },
         select: { installmentAmount: true, paidAmount: true },
       }),
@@ -57,14 +67,24 @@ export async function GET() {
     const todayCollectionAmount = todayPayments.reduce((sum, p) => sum + p.amount, 0);
     const totalCollectionsAmount = allPayments.reduce((sum, p) => sum + p.amount, 0);
 
-    const pendingCollectionsCount = pendingInstallments.length;
-    const pendingCollectionsAmount = pendingInstallments.reduce(
+    const todayDueAmount = todayInstallments.reduce((sum, i) => sum + i.installmentAmount, 0);
+    const todayDueCount = todayInstallments.length;
+
+    const todayPendingInstallments = todayInstallments.filter((i) => i.paidAmount < i.installmentAmount);
+    const todayPendingAmount = todayPendingInstallments.reduce(
       (sum, i) => sum + Math.max(0, i.installmentAmount - i.paidAmount),
       0
     );
+    const todayPendingCount = todayPendingInstallments.length;
+    const todayPendingCustomers = new Set(todayPendingInstallments.map((i) => i.customerId)).size;
+
+    const overdueAmount = overdueInstallments.reduce(
+      (sum, i) => sum + Math.max(0, i.installmentAmount - i.paidAmount),
+      0
+    );
+    const overdueCount = overdueInstallments.length;
 
     const activeLoanCount = activeLoans.length;
-    // Set of distinct customer IDs that have active loans
     const activeCustomerIds = new Set(activeLoans.map((l) => l.customerId));
     const activeCustomerCount = activeCustomerIds.size;
 
@@ -80,10 +100,17 @@ export async function GET() {
             code: user.username.toUpperCase(),
           },
       stats: {
+        todayDueAmount,
+        todayDueCount,
         todayCollectionsCount,
         todayCollectionAmount,
-        pendingCollectionsCount,
-        pendingCollectionsAmount,
+        pendingCollectionsCount: todayPendingCount,
+        pendingCollectionsAmount: todayPendingAmount,
+        todayPendingAmount,
+        todayPendingCount,
+        todayPendingCustomers,
+        overdueAmount,
+        overdueCount,
         totalCollectionsAmount,
         activeCustomerCount,
         totalCustomers,

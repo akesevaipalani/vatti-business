@@ -130,8 +130,8 @@ export async function POST(req: Request) {
       } as any,
     });
 
-    // 1b. Generate scheduled installments in database
-    await generateInstallmentsForLoan(loan.id);
+    // 1b. Generate scheduled installments in database with high performance precalculated batch
+    await generateInstallmentsForLoan(loan.id, calc.schedule, { customerId });
 
     // 2. Guarantor if provided
     if (guarantorName) {

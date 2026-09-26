@@ -39,16 +39,21 @@ export interface LoanCalculationResult {
   schedule: ScheduleItem[];
 }
 
+import { toISTDateString } from "@/lib/date";
+
 function getDueDateForInstallment(startDate: Date, frequency: "DAILY" | "WEEKLY" | "MONTHLY", index: number): string {
-  const d = new Date(startDate);
+  const istStr = toISTDateString(startDate);
+  const [y, m, d] = istStr.split("-").map(Number);
+  const targetDate = new Date(y, m - 1, d, 12, 0, 0);
+
   if (frequency === "DAILY") {
-    d.setDate(d.getDate() + index);
+    targetDate.setDate(targetDate.getDate() + index);
   } else if (frequency === "WEEKLY") {
-    d.setDate(d.getDate() + index * 7);
+    targetDate.setDate(targetDate.getDate() + index * 7);
   } else {
-    d.setMonth(d.getMonth() + index);
+    targetDate.setMonth(targetDate.getMonth() + index);
   }
-  return d.toISOString().split("T")[0];
+  return toISTDateString(targetDate);
 }
 
 export function calculateLoan(input: LoanCalculationInput): LoanCalculationResult {
