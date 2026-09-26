@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/context/LanguageContext";
 import { calculateLoan, LoanCalculationResult } from "@/lib/loans/calculator";
+import { getTodayIST } from "@/lib/date";
 
 interface CustomerOption {
   id: string;
@@ -45,7 +46,7 @@ export default function NewLoanPage() {
   const [principalAmount, setPrincipalAmount] = useState("50000");
   const [processingFee, setProcessingFee] = useState("0");
   const [paymentMethod, setPaymentMethod] = useState("CASH");
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [startDate, setStartDate] = useState(() => getTodayIST());
   const [notes, setNotes] = useState("");
 
   // Standard Loan Fields (Flat / Reducing / Simple / Manual)
@@ -197,6 +198,8 @@ export default function NewLoanPage() {
         processingFee: numFee,
         paymentMethod,
         startDate,
+        date: startDate,
+        disbursementDate: startDate,
         notes,
         guarantorName,
         guarantorMobile,
@@ -911,7 +914,7 @@ export default function NewLoanPage() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Sanction / Start Date
+                    Loan / Disbursement Date *
                   </label>
                   <input
                     type="date"
@@ -920,6 +923,9 @@ export default function NewLoanPage() {
                     onChange={(e) => setStartDate(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono focus:ring-2 focus:ring-indigo-500"
                   />
+                  <span className="block text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                    Schedule calculated from this disbursement date
+                  </span>
                 </div>
               </div>
 

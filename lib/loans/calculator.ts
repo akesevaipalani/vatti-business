@@ -39,7 +39,7 @@ export interface LoanCalculationResult {
   schedule: ScheduleItem[];
 }
 
-import { toISTDateString } from "@/lib/date";
+import { toISTDateString, parseISTDate, getTodayIST } from "@/lib/date";
 
 function getDueDateForInstallment(startDate: Date, frequency: "DAILY" | "WEEKLY" | "MONTHLY", index: number): string {
   const istStr = toISTDateString(startDate);
@@ -61,7 +61,7 @@ export function calculateLoan(input: LoanCalculationInput): LoanCalculationResul
   const processingFee = Number(input.processingFee) || 0;
   const calculationType = input.loanCalculationType || "STANDARD";
   const frequency = input.paymentFrequency || "MONTHLY";
-  const startDate = input.startDate ? new Date(input.startDate) : new Date();
+  const startDate = input.startDate ? parseISTDate(input.startDate) : parseISTDate(getTodayIST());
 
   // =========================================================================
   // TYPE 1: ADVANCE INTEREST (முன் வட்டி)

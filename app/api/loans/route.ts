@@ -4,6 +4,7 @@ import { calculateLoan } from "@/lib/loans/calculator";
 import { postLoanDisbursement } from "@/lib/accounting/engine";
 import { generateInstallmentsForLoan } from "@/lib/loans/installments";
 import { getNextLoanNumber } from "@/lib/documents/numbering";
+import { parseISTDate, toISTDateString } from "@/lib/date";
 import { Prisma } from "@prisma/client";
 
 export async function GET(req: Request) {
@@ -60,6 +61,8 @@ export async function POST(req: Request) {
       processingFee,
       paymentMethod,
       startDate,
+      date,
+      disbursementDate,
       notes,
       guarantorName,
       guarantorMobile,
@@ -79,9 +82,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Customer not found" }, { status: 404 });
     }
 
+    // Authoritative Business Date in IST (e.g. 2026-09-24)
+    const rawDate = startDate || date || disbursementDate;
+    const loanDate = parseISTDate(rawDate);
+
     const calculationType = (loanCalculationType as "STANDARD" | "ADVANCE_INTEREST" | "INTEREST_PRINCIPAL") || "STANDARD";
 
-    // Run accurate loan calculation
+    // Run accurate loan calculation starting from the selected disbursement date
     const calc = calculateLoan({
       principal,
       loanCalculationType: calculationType,
@@ -96,7 +103,7 @@ export async function POST(req: Request) {
       interestFrequency: interestFrequency || "MONTHLY",
       paymentFrequency: paymentFrequency || "MONTHLY",
       totalInstallments: Number(totalInstallments) || 12,
-      startDate: startDate ? new Date(startDate) : new Date(),
+      startDate: loanDate,
     });
 
     const loanNo = await getNextLoanNumber();
@@ -105,11 +112,12 @@ export async function POST(req: Request) {
     const lastItem = calc.schedule[calc.schedule.length - 1];
     const dueDate = lastItem ? new Date(lastItem.dueDate) : new Date(Date.now() + 30 * 86400000);
 
-    // 1. Create Loan Record
+    // 1. Create Loan Record with explicit disbursement date
     const loan = await prisma.loan.create({
       data: {
         loanNo,
         customerId,
+        date: loanDate, // <--- Authoritative Loan / Disbursement Date saved in PostgreSQL
         principalAmount: principal,
         loanCalculationType: calculationType,
         advanceInterest: calc.advanceInterest,
@@ -168,6 +176,7 @@ export async function POST(req: Request) {
       advanceInterest: calc.advanceInterest,
       processingFee: Number(processingFee) || 0,
       paymentMethod: paymentMethod || "CASH",
+      date: loanDate,
     });
 
     // 5. Audit Log

@@ -232,6 +232,7 @@ export async function postLoanDisbursement(params: {
   advanceInterest?: number;
   processingFee?: number;
   paymentMethod: string;
+  date?: Date;
 }) {
   const assetAccountCode = params.paymentMethod === "CASH" ? "1010" : "1020";
   const advInt = Number(params.advanceInterest) || 0;
@@ -269,6 +270,7 @@ export async function postLoanDisbursement(params: {
   }
 
   return await postTransaction({
+    date: params.date,
     description: `Loan Disbursed to ${params.customerName}${advInt > 0 ? ` (Adv Int: ₹${advInt})` : ""}`,
     referenceType: "LOAN_GIVEN",
     referenceId: params.loanId,
