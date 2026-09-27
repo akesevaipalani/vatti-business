@@ -13,6 +13,7 @@ export interface PartnerStatsResponse {
     code: string;
   };
   stats: {
+    availableCash?: number;
     todayCollectionsCount: number;
     todayCollectionAmount: number;
     pendingCollectionsCount: number;

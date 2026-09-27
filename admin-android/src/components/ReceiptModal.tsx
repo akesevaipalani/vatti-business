@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   CheckCircle2,
   Share2,
@@ -50,6 +50,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
 
+  const [remoteReceipt, setRemoteReceipt] = useState<CollectionReceiptData | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !payment?.id) {
+      setRemoteReceipt(null);
+      return;
+    }
+    api.getCollectionReceiptData(payment.id)
+      .then((data: any) => {
+        if (data?.receipt) setRemoteReceipt(data.receipt);
+      })
+      .catch((err: any) => {
+        console.warn("[ReceiptModal] Could not fetch remote receipt:", err);
+      });
+  }, [isOpen, payment?.id]);
+
   if (!isOpen || !payment) return null;
 
   const receiptNumber = (payment as any).receiptNo || payment.paymentNo || "ABC/RCPT/2026/000001";
@@ -59,7 +75,31 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const paymentMethod = ((payment.paymentMethod || "CASH") as "CASH" | "UPI" | "BANK");
 
   const buildReceiptData = (): CollectionReceiptData => {
-    const prevOutstanding = currentOutstanding + payment.principalPortion + payment.interestPortion;
+    if (remoteReceipt) return remoteReceipt;
+
+    const rawPrev = (payment as any).previousOutstanding;
+    const rawCurr = (payment as any).currentOutstanding;
+    let prevOutstanding = rawPrev !== undefined ? Number(rawPrev) : 0;
+    let currOutstanding = rawCurr !== undefined ? Number(rawCurr) : 0;
+
+    if (rawPrev === undefined || rawCurr === undefined) {
+      const loanAny = payment.loan as any;
+      const isAdvInt = loanAny?.loanCalculationType === "ADVANCE_INTEREST" || Boolean(loanAny?.advanceInterest && loanAny?.advanceInterest > 0);
+      const totPayable = Number(loanAny?.totalPayable || (loanAny?.principalAmount ? (loanAny.principalAmount + (isAdvInt ? 0 : (loanAny?.interestOutstanding || 0))) : 0));
+
+      if (currentOutstanding > 0) {
+        currOutstanding = currentOutstanding;
+        prevOutstanding = currentOutstanding + payment.amount;
+      } else if (totPayable > 0) {
+        prevOutstanding = totPayable;
+        currOutstanding = Math.max(0, totPayable - payment.amount);
+      } else {
+        const baseOutstanding = (loanAny?.principalOutstanding || 0) + (isAdvInt ? 0 : (loanAny?.interestOutstanding || 0));
+        currOutstanding = Math.max(0, baseOutstanding);
+        prevOutstanding = currOutstanding + payment.amount;
+      }
+    }
+
     return {
       receiptNo: receiptNumber,
       loanNo: loanNumber,
@@ -75,7 +115,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       interestPaid: payment.interestPortion,
       otherCharges: (payment as any).lateFeePortion || 0,
       totalAmountPaid: payment.amount,
-      currentOutstanding,
+      currentOutstanding: currOutstanding,
       paymentMethod,
       referenceNo: payment.referenceNo || undefined,
       collectedBy: user?.name || "ABC FINANCE Representative",
@@ -171,19 +211,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
     }
   };
 
+  const receiptData = buildReceiptData();
+
   const fallbackManualShare = () => {
     const text = `*ABC FINANCE - PAYMENT RECEIPT*
 --------------------------------
-Receipt No: ${receiptNumber}
-Loan No: ${loanNumber}
-Customer: ${custName}
-Date: ${new Date(payment.date || Date.now()).toLocaleDateString("en-IN")}
-Amount Paid: Rs. ${payment.amount.toLocaleString("en-IN")}
-Principal Credited: Rs. ${payment.principalPortion.toLocaleString("en-IN")}
-Interest Credited: Rs. ${payment.interestPortion.toLocaleString("en-IN")}
-Remaining Outstanding: Rs. ${currentOutstanding.toLocaleString("en-IN")}
-Payment Mode: ${paymentMethod}
-Received By: ${user?.name || "ABC FINANCE Representative"}
+Receipt No: ${receiptData.receiptNo}
+Loan No: ${receiptData.loanNo}
+Customer: ${receiptData.customer.name}
+Date: ${new Date(receiptData.collectionDate || Date.now()).toLocaleDateString("en-IN")}
+Previous Outstanding: Rs. ${receiptData.previousOutstanding.toLocaleString("en-IN")}
+Amount Paid: Rs. ${receiptData.totalAmountPaid.toLocaleString("en-IN")}
+Principal Credited: Rs. ${receiptData.principalPaid.toLocaleString("en-IN")}
+Interest Credited: Rs. ${receiptData.interestPaid.toLocaleString("en-IN")}
+Remaining Outstanding: Rs. ${receiptData.currentOutstanding.toLocaleString("en-IN")}
+Payment Mode: ${receiptData.paymentMethod}
+Received By: ${receiptData.collectedBy || user?.name || "ABC FINANCE Representative"}
 --------------------------------
 Thank you for your payment! Please preserve this receipt for your records.
 ABC FINANCE | Contact: +91 96008 71898`;
@@ -243,21 +286,28 @@ ABC FINANCE | Contact: +91 96008 71898`;
           <div className="flex justify-between items-center border-b border-slate-200/60 dark:border-slate-700/60 pb-1.5">
             <span className="text-slate-500">{language === "ta" ? "பணம் செலுத்திய முறை" : "Payment Mode"}:</span>
             <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-              {paymentMethod}
+              {receiptData.paymentMethod}
+            </span>
+          </div>
+
+          <div className="flex justify-between items-center border-b border-slate-200/60 dark:border-slate-700/60 pb-1.5 text-[11px] text-slate-500">
+            <span>{language === "ta" ? "முந்தைய நிலுவை" : "Previous Outstanding"}:</span>
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              ₹{receiptData.previousOutstanding.toLocaleString("en-IN")}
             </span>
           </div>
 
           <div className="flex justify-between items-center border-b border-slate-200/60 dark:border-slate-700/60 pb-1.5">
             <span className="text-slate-500">{language === "ta" ? "அசல் பகுதி" : "Principal Portion"}:</span>
             <span className="font-medium text-slate-700 dark:text-slate-300">
-              ₹{payment.principalPortion.toLocaleString("en-IN")}
+              ₹{receiptData.principalPaid.toLocaleString("en-IN")}
             </span>
           </div>
 
           <div className="flex justify-between items-center border-b border-slate-200/60 dark:border-slate-700/60 pb-1.5">
             <span className="text-slate-500">{language === "ta" ? "வட்டி பகுதி" : "Interest Portion"}:</span>
             <span className="font-medium text-slate-700 dark:text-slate-300">
-              ₹{payment.interestPortion.toLocaleString("en-IN")}
+              ₹{receiptData.interestPaid.toLocaleString("en-IN")}
             </span>
           </div>
 
@@ -266,14 +316,14 @@ ABC FINANCE | Contact: +91 96008 71898`;
               {language === "ta" ? "செலுத்திய தொகை" : "Total Received"}:
             </span>
             <span className="text-emerald-600 dark:text-emerald-400 text-base font-extrabold">
-              ₹{payment.amount.toLocaleString("en-IN")}
+              ₹{receiptData.totalAmountPaid.toLocaleString("en-IN")}
             </span>
           </div>
 
           <div className="flex justify-between items-center text-[11px] pt-0.5 text-slate-500">
             <span>{language === "ta" ? "மீதமுள்ள நிலுவை" : "Remaining Outstanding"}:</span>
-            <span className="font-bold text-amber-600 dark:text-amber-400">
-              ₹{currentOutstanding.toLocaleString("en-IN")}
+            <span className="font-bold text-emerald-700 dark:text-emerald-400">
+              ₹{receiptData.currentOutstanding.toLocaleString("en-IN")}
             </span>
           </div>
         </div>

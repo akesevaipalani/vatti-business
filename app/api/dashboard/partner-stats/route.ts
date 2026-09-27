@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getISTDayRange } from "@/lib/date";
+import { getDashboardFinancialStats } from "@/lib/financials/stats";
 
 export async function GET() {
   try {
@@ -20,6 +21,7 @@ export async function GET() {
       overdueInstallments,
       totalCustomers,
       partnerRecord,
+      dashStats,
     ] = await Promise.all([
       // Today's collections
       prisma.loanPayment.findMany({
@@ -61,6 +63,7 @@ export async function GET() {
             select: { id: true, name: true, partnerCode: true },
           })
         : null,
+      getDashboardFinancialStats(),
     ]);
 
     const todayCollectionsCount = todayPayments.length;
@@ -87,6 +90,7 @@ export async function GET() {
     const activeLoanCount = activeLoans.length;
     const activeCustomerIds = new Set(activeLoans.map((l) => l.customerId));
     const activeCustomerCount = activeCustomerIds.size;
+    const availableCash = dashStats.kpis.availableCash;
 
     return NextResponse.json({
       role: user.role,
@@ -100,6 +104,7 @@ export async function GET() {
             code: user.username.toUpperCase(),
           },
       stats: {
+        availableCash,
         todayDueAmount,
         todayDueCount,
         todayCollectionsCount,

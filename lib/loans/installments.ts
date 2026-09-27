@@ -48,6 +48,8 @@ export interface InstallmentScheduleItem {
   actualPaymentDate?: string | null;
   paymentMethod?: string | null;
   notes?: string | null;
+  loanCalculationType?: string;
+  advanceInterest?: number;
 }
 
 export interface CollectedTodayPaymentItem {
@@ -201,13 +203,14 @@ export async function generateInstallmentsForLoan(
   if (existingCount > 0) return; // Already generated
 
   const l = loan as any;
+  const isAdvanceLoan = l.loanCalculationType === "ADVANCE_INTEREST" || Boolean(l.advanceInterest && l.advanceInterest > 0);
   const calc = calculateLoan({
     principal: loan.principalAmount,
-    loanCalculationType: (l.loanCalculationType as "STANDARD" | "ADVANCE_INTEREST" | "INTEREST_PRINCIPAL") || "STANDARD",
+    loanCalculationType: isAdvanceLoan ? "ADVANCE_INTEREST" : ((l.loanCalculationType as "STANDARD" | "ADVANCE_INTEREST" | "INTEREST_PRINCIPAL") || "STANDARD"),
     interestRate: loan.interestRate,
     interestType: loan.interestType as "FLAT" | "REDUCING" | "SIMPLE",
     advanceInterestAmount: l.advanceInterest,
-    customInterestAmount: loan.totalPayable > loan.principalAmount ? loan.totalPayable - loan.principalAmount : undefined,
+    customInterestAmount: isAdvanceLoan ? undefined : (loan.totalPayable > loan.principalAmount ? loan.totalPayable - loan.principalAmount : undefined),
     customInstallmentAmount: loan.installmentAmount,
     processingFee: loan.processingFee,
     interestFrequency: loan.interestFrequency as "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY",
@@ -372,6 +375,8 @@ function mapInstallmentToItem(
     actualPaymentDate: inst.actualPaymentDate ? toISTDateString(inst.actualPaymentDate) : null,
     paymentMethod: inst.paymentMethod || null,
     notes: inst.notes || null,
+    loanCalculationType: inst.loan?.loanCalculationType || "STANDARD",
+    advanceInterest: (inst.loan as any)?.advanceInterest || 0,
   };
 }
 
@@ -486,9 +491,14 @@ export async function getCollectionSchedule(
       amountCollected: p.amount,
       principalPortion: p.principalPortion,
       interestPortion: p.interestPortion,
+      principal: p.principalPortion,
+      principalPaid: p.principalPortion,
+      interest: p.interestPortion,
+      interestPaid: p.interestPortion,
       paymentMethod: p.paymentMethod,
       status: "PAID",
       notes: p.notes,
+      loanCalculationType: p.loan?.loanCalculationType || "STANDARD",
     };
   });
 
@@ -663,14 +673,27 @@ export async function recordCollectionForInstallment(data: {
 
   const loan = installment.loan;
 
+  const isAdvanceInterest = loan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((loan as any).advanceInterest && (loan as any).advanceInterest > 0);
+  const remInterestOutstanding = Math.max(0, loan.interestOutstanding || 0);
+
   // Split allocation
   let pPortion = Number(principalPortion);
   let iPortion = Number(interestPortion);
 
-  if (isNaN(pPortion) || isNaN(iPortion) || pPortion + iPortion === 0) {
-    // Proportional or interest first split
+  if (isAdvanceInterest || remInterestOutstanding <= 0 || installment.interestPortion === 0) {
+    // Pure principal recovery for Advance Interest or zero interest loans
+    iPortion = 0;
+    pPortion = amount;
+  } else if (isNaN(pPortion) || isNaN(iPortion) || Math.round((pPortion + iPortion) * 100) !== Math.round(amount * 100)) {
+    // Scheduled installment interest split
     const remInterest = Math.max(0, installment.interestPortion - installment.interestPaid);
-    iPortion = Math.min(remInterest, amount);
+    iPortion = Math.min(remInterest, Math.min(remInterestOutstanding, amount));
+    pPortion = amount - iPortion;
+  } else {
+    // Validate client split: cap interest at remaining installment interest and loan interest outstanding
+    const remInterest = Math.max(0, installment.interestPortion - installment.interestPaid);
+    const maxAllowedInterest = Math.min(remInterest, remInterestOutstanding);
+    iPortion = Math.min(Math.max(0, iPortion), maxAllowedInterest);
     pPortion = amount - iPortion;
   }
 
@@ -682,6 +705,8 @@ export async function recordCollectionForInstallment(data: {
     const utcMs = Date.UTC(y, m - 1, d, now.getUTCHours(), now.getUTCMinutes(), now.getUTCSeconds());
     paymentDate = new Date(utcMs);
   }
+
+  const previousOutstanding = Math.round(((loan.principalOutstanding || 0) + (isAdvanceInterest ? 0 : (loan.interestOutstanding || 0))) * 100) / 100;
 
   const newPaidAmount = installment.paidAmount + amount;
   const isFullyPaid = newPaidAmount >= installment.installmentAmount;
@@ -702,11 +727,12 @@ export async function recordCollectionForInstallment(data: {
   });
 
   // 2. Update Loan outstanding balances
-  const newPrincipalOutstanding = Math.max(0, loan.principalOutstanding - pPortion);
-  const newInterestOutstanding = Math.max(0, loan.interestOutstanding - iPortion);
-  const isLoanClosed = newPrincipalOutstanding <= 0 && newInterestOutstanding <= 0;
+  const newPrincipalOutstanding = Math.max(0, Math.round((loan.principalOutstanding - pPortion) * 100) / 100);
+  const newInterestOutstanding = Math.max(0, Math.round((loan.interestOutstanding - iPortion) * 100) / 100);
+  const remainingOutstanding = Math.max(0, Math.round((previousOutstanding - amount) * 100) / 100);
+  const isLoanClosed = newPrincipalOutstanding <= 0 && (isAdvanceInterest || newInterestOutstanding <= 0);
 
-  await prisma.loan.update({
+  const updatedLoan = await prisma.loan.update({
     where: { id: loan.id },
     data: {
       principalPaid: { increment: pPortion },
@@ -767,5 +793,15 @@ export async function recordCollectionForInstallment(data: {
     status: isFullyPaid ? "PAID" : "PARTIAL",
   });
 
-  return { installment: updatedInstallment, payment };
+  return {
+    installment: updatedInstallment,
+    payment: {
+      ...payment,
+      previousOutstanding,
+      currentOutstanding: remainingOutstanding,
+    },
+    loan: updatedLoan,
+    previousOutstanding,
+    currentOutstanding: remainingOutstanding,
+  };
 }

@@ -642,6 +642,7 @@ export const DailyScreen: React.FC = () => {
           customerName={receiptCustomer.name}
           mobile={receiptCustomer.mobile}
           loanNo={receiptCustomer.loanNo}
+          currentOutstanding={(receiptPayment as any).currentOutstanding}
         />
       )}
     </div>

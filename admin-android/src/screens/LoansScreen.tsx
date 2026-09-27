@@ -415,7 +415,7 @@ export const LoansScreen: React.FC = () => {
           }
         } catch { dueDateFormatted = String(rawDate); }
       }
-      return { id: inst.id || `i-${instNum}`, installmentNumber: instNum, dueDateFormatted, installmentAmount: expectedAmt, principalPortion: prin, interestPortion: intVal, paidAmount: paid, balanceAmount: bal, status: String(inst.status || (bal === 0 ? "COLLECTED" : "PENDING")) };
+      return { id: inst.id || `i-${instNum}`, installmentNumber: instNum, dueDate: rawDate, dueDateFormatted, installmentAmount: expectedAmt, principalPortion: prin, interestPortion: intVal, paidAmount: paid, balanceAmount: bal, status: String(inst.status || (bal === 0 ? "COLLECTED" : "PENDING")) };
     });
   }, [selectedLoan]);
 
@@ -560,7 +560,7 @@ export const LoansScreen: React.FC = () => {
                   { label: ta ? "வட்டி முறை" : "Interest Method", value: `${selectedLoan.interestType || "-"} (${selectedLoan.loanCalculationType || "STANDARD"})` },
                   { label: ta ? "வட்டி விகிதம்" : "Interest Rate", value: selectedLoan.interestRate ? `${selectedLoan.interestRate}%` : "Custom" },
                   { label: ta ? "வசூலிக்கப்பட்டது" : "Collected", value: `₹${fmt((selectedLoan.principalPaid || 0) + (selectedLoan.interestPaid || 0))}`, color: "text-emerald-600" },
-                  { label: ta ? "மீதமுள்ள நிலுவை" : "Outstanding", value: `₹${fmt((selectedLoan.principalOutstanding || 0) + (selectedLoan.interestOutstanding || 0))}`, color: "text-amber-600" },
+                  { label: ta ? "மீதமுள்ள நிலுவை" : "Outstanding", value: `₹${fmt((selectedLoan.principalOutstanding || 0) + (selectedLoan.loanCalculationType === "ADVANCE_INTEREST" ? 0 : (selectedLoan.interestOutstanding || 0)))}`, color: "text-amber-600" },
                 ].map((item) => (
                   <div key={item.label}>
                     <span className="text-slate-400 text-[11px] block">{item.label}</span>
@@ -633,7 +633,13 @@ export const LoansScreen: React.FC = () => {
 
             {/* Document Button */}
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button type="button" onClick={() => { setDocumentLoan({ ...selectedLoan, installments: scheduleItems.length > 0 ? (scheduleItems as any) : selectedLoan.installments, customer: selectedLoan.customer, date: selectedLoan.date }); setShowDocModal(true); }}
+              <button type="button" onClick={() => {
+                const effInsts = (selectedLoan.installments && selectedLoan.installments.length > 0)
+                  ? selectedLoan.installments
+                  : (scheduleItems.length > 0 ? (scheduleItems as any) : []);
+                setDocumentLoan({ ...selectedLoan, installments: effInsts, customer: selectedLoan.customer, date: selectedLoan.date });
+                setShowDocModal(true);
+              }}
                 className="w-full py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md tap-active">
                 <FileText className="w-4 h-4" />
                 <span>{ta ? "கடன் அனுமதி ஆவணம் (PDF & WhatsApp)" : "Sanction Order (PDF & WhatsApp)"}</span>

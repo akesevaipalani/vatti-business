@@ -38,13 +38,33 @@ export async function POST(
       return NextResponse.json({ error: "Loan not found" }, { status: 404 });
     }
 
-    // Determine default allocation if not explicitly split
+    // Determine allocation based on authoritative loan calculation type and outstanding balances
     let pPortion = Number(principalPortion);
     let iPortion = Number(interestPortion);
 
-    if (isNaN(pPortion) || isNaN(iPortion) || pPortion + iPortion === 0) {
-      // Default: interest first, rest to principal
-      iPortion = Math.min(loan.interestOutstanding, totalAmount);
+    const isAdvanceInterest = loan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((loan as any).advanceInterest && (loan as any).advanceInterest > 0);
+    const remInterestOutstanding = Math.max(0, loan.interestOutstanding || 0);
+
+    if (isAdvanceInterest || remInterestOutstanding <= 0) {
+      // ADVANCE INTEREST / zero interest balance: Pure principal recovery
+      iPortion = 0;
+      pPortion = totalAmount;
+    } else if (isNaN(pPortion) || isNaN(iPortion) || Math.round((pPortion + iPortion) * 100) !== Math.round(totalAmount * 100)) {
+      // Automatic split: Check next unpaid installment for scheduled interest portion
+      const nextUnpaid = await prisma.loanInstallment.findFirst({
+        where: { loanId: id, status: { not: "COLLECTED" } },
+        orderBy: { installmentNumber: "asc" },
+      });
+      if (nextUnpaid && nextUnpaid.interestPortion > 0) {
+        const remInstInterest = Math.max(0, nextUnpaid.interestPortion - nextUnpaid.interestPaid);
+        iPortion = Math.min(remInstInterest, Math.min(remInterestOutstanding, totalAmount));
+      } else {
+        iPortion = Math.min(remInterestOutstanding, totalAmount);
+      }
+      pPortion = totalAmount - iPortion;
+    } else {
+      // Validate client split: interest cannot exceed loan interest outstanding
+      iPortion = Math.min(Math.max(0, iPortion), remInterestOutstanding);
       pPortion = totalAmount - iPortion;
     }
 
@@ -62,6 +82,8 @@ export async function POST(
         paymentDate = new Date(rawDate);
       }
     }
+
+    const previousOutstanding = Math.round(((loan.principalOutstanding || 0) + (isAdvanceInterest ? 0 : (loan.interestOutstanding || 0))) * 100) / 100;
 
     // 1. Create Payment record with explicit collection date
     const payment = await prisma.loanPayment.create({
@@ -81,9 +103,10 @@ export async function POST(
     });
 
     // 2. Update Loan outstanding balances
-    const newPrincipalOutstanding = Math.max(0, loan.principalOutstanding - pPortion);
-    const newInterestOutstanding = Math.max(0, loan.interestOutstanding - iPortion);
-    const isFullyPaid = newPrincipalOutstanding <= 0 && newInterestOutstanding <= 0;
+    const newPrincipalOutstanding = Math.max(0, Math.round((loan.principalOutstanding - pPortion) * 100) / 100);
+    const newInterestOutstanding = Math.max(0, Math.round((loan.interestOutstanding - iPortion) * 100) / 100);
+    const currentOutstanding = Math.max(0, Math.round((previousOutstanding - totalAmount) * 100) / 100);
+    const isFullyPaid = newPrincipalOutstanding <= 0 && (isAdvanceInterest || newInterestOutstanding <= 0);
 
     const updatedLoan = await prisma.loan.update({
       where: { id },
@@ -109,7 +132,9 @@ export async function POST(
       const pendingOnInst = inst.installmentAmount - inst.paidAmount;
       const applied = Math.min(remToApply, pendingOnInst);
       const isComplete = (inst.paidAmount + applied) >= inst.installmentAmount;
-      const iApplied = Math.min(Math.max(0, inst.interestPortion - inst.interestPaid), applied);
+      const iApplied = isAdvanceInterest || inst.interestPortion === 0
+        ? 0
+        : Math.min(Math.max(0, inst.interestPortion - inst.interestPaid), applied);
       const pApplied = applied - iApplied;
 
       await prisma.loanInstallment.update({
@@ -163,7 +188,17 @@ export async function POST(
       time: Date.now(),
     });
 
-    return NextResponse.json({ success: true, payment, loan: updatedLoan });
+    return NextResponse.json({
+      success: true,
+      payment: {
+        ...payment,
+        previousOutstanding,
+        currentOutstanding,
+      },
+      loan: updatedLoan,
+      previousOutstanding,
+      currentOutstanding,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to record payment";
     return NextResponse.json({ error: message }, { status: 500 });

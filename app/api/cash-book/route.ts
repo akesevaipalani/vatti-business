@@ -52,7 +52,7 @@ export async function GET() {
           include: { customer: { select: { name: true } } },
           orderBy: { date: "desc" },
           take: 50,
-        }),
+        } as any),
       ]);
 
     const cashEntries: CashEntry[] = [];
@@ -94,14 +94,24 @@ export async function GET() {
     });
 
     cashLoans.forEach((l) => {
+      // Use actual cash disbursed to customer (disbursedAmount), NOT the face principal amount.
+      // For Advance Interest loans: disbursedAmount = principalAmount - advanceInterest - processingFee.
+      // The advance interest is retained by the business as cash-in-hand and must NOT be counted as cash-out.
+      const lAny = l as any;
+      const adv = Number(lAny.advanceInterest) || 0;
+      const pFee = Number(lAny.processingFee) || 0;
+      const actualDisbursed = lAny.disbursedAmount && lAny.disbursedAmount > 0
+        ? lAny.disbursedAmount
+        : Math.max(0, lAny.principalAmount - adv - pFee);
+      const customerName: string = lAny.customer?.name ?? "";
       cashEntries.push({
-        id: `loan-${l.id}`,
-        date: l.date,
+        id: `loan-${lAny.id}`,
+        date: lAny.date,
         type: "OUT",
         category: "DISBURSEMENT",
-        title: `Loan Disbursed: ${l.customer.name} (${l.loanNo})`,
-        amount: l.principalAmount,
-        ref: l.loanNo,
+        title: `Loan Disbursed: ${customerName} (${lAny.loanNo})`,
+        amount: actualDisbursed,
+        ref: lAny.loanNo,
       });
     });
 

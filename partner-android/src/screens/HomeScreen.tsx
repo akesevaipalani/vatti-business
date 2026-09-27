@@ -8,6 +8,7 @@ import {
   Calendar,
   UserPlus,
   RefreshCw,
+  Wallet,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../services/api";
@@ -95,22 +96,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </button>
         </div>
 
-        {/* Hero Today Collection Card */}
-        <div className="mt-5 bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/15">
-          <div className="flex justify-between items-center text-xs text-indigo-100 mb-1">
-            <span>{language === "ta" ? "இன்றைய வசூல் தொகை" : "Today's Collection"}</span>
-            <span className="text-[11px] bg-emerald-500/30 text-emerald-200 font-bold px-2 py-0.5 rounded-md">
-              {new Date().toLocaleDateString("en-IN")}
-            </span>
+        {/* Hero Available Cash & Today Collection Strip */}
+        <div className="grid grid-cols-2 gap-3 mt-5">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-indigo-100">
+              <span>{language === "ta" ? "கையிருப்பு ரொக்கம்" : "Available Cash"}</span>
+              <Wallet className="w-3.5 h-3.5 text-emerald-300" />
+            </div>
+            <div className="text-2xl font-black text-white tracking-tight">
+              ₹{stats ? (stats.availableCash ?? 0).toLocaleString("en-IN") : "0"}
+            </div>
           </div>
-          <div className="text-3xl font-black text-white tracking-tight">
-            ₹{stats ? stats.todayCollectionAmount.toLocaleString("en-IN") : "0"}
-          </div>
-          <div className="flex items-center gap-2 mt-2 text-xs text-indigo-200">
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-            <span>
-              {stats?.todayCollectionsCount || 0} {language === "ta" ? "வசூல் பதிவாகியுள்ளது" : "payments recorded today"}
-            </span>
+
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-indigo-100">
+              <span>{language === "ta" ? "இன்றைய வசூல்" : "Today's Collection"}</span>
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <div className="text-2xl font-black text-white tracking-tight">
+              ₹{stats ? stats.todayCollectionAmount.toLocaleString("en-IN") : "0"}
+            </div>
           </div>
         </div>
       </div>

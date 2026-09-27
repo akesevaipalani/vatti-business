@@ -411,7 +411,7 @@ export const LoansScreen: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><span className="text-slate-400">{ta ? "நிலுவை அசல்" : "Outstanding Principal"}:</span><div className="font-bold text-slate-800 dark:text-slate-200">₹{selectedLoan.principalOutstanding.toLocaleString("en-IN")}</div></div>
-                <div className="text-right"><span className="text-slate-400">{ta ? "நிலுவை வட்டி" : "Interest Due"}:</span><div className="font-bold text-amber-600">₹{selectedLoan.interestOutstanding.toLocaleString("en-IN")}</div></div>
+                <div className="text-right"><span className="text-slate-400">{ta ? "நிலுவை வட்டி" : "Interest Due"}:</span><div className="font-bold text-amber-600">₹{(selectedLoan.loanCalculationType === "ADVANCE_INTEREST" ? 0 : selectedLoan.interestOutstanding).toLocaleString("en-IN")}</div></div>
                 <div><span className="text-slate-400">{ta ? "செலுத்திய அசல்" : "Principal Paid"}:</span><div className="font-bold text-emerald-600">₹{selectedLoan.principalPaid.toLocaleString("en-IN")}</div></div>
                 <div className="text-right"><span className="text-slate-400">{ta ? "செலுத்திய வட்டி" : "Interest Paid"}:</span><div className="font-bold text-emerald-600">₹{selectedLoan.interestPaid.toLocaleString("en-IN")}</div></div>
                 <div><span className="text-slate-400">{ta ? "தவணை தொகை" : "Installment"}:</span><div className="font-bold text-indigo-600">₹{(selectedLoan.installmentAmount || 0).toLocaleString("en-IN")}</div></div>

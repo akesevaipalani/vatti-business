@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getDashboardFinancialStats } from "./stats";
 
 export async function generateProfitAndLossReport(startDate?: Date, endDate?: Date) {
   const dateFilter = {
@@ -8,7 +9,7 @@ export async function generateProfitAndLossReport(startDate?: Date, endDate?: Da
 
   const hasDateFilter = startDate || endDate;
 
-  const [payments, incomes, expenses, borrowedLoans] = await Promise.all([
+  const [payments, incomes, expenses, borrowedLoans, advanceInterestLoans] = await Promise.all([
     prisma.loanPayment.findMany({
       where: hasDateFilter ? { date: dateFilter } : undefined,
       select: { interestPortion: true, lateFeePortion: true },
@@ -24,9 +25,15 @@ export async function generateProfitAndLossReport(startDate?: Date, endDate?: Da
     prisma.borrowedLoan.findMany({
       select: { interestPaid: true },
     }),
+    prisma.loan.findMany({
+      where: hasDateFilter ? { date: dateFilter } : undefined,
+      select: { advanceInterest: true },
+    }),
   ]);
 
-  const interestIncome = payments.reduce((sum, p) => sum + p.interestPortion, 0);
+  const advanceInterestIncome = advanceInterestLoans.reduce((sum, l) => sum + (Number((l as any).advanceInterest) || 0), 0);
+  const periodicInterestIncome = payments.reduce((sum, p) => sum + (p.interestPortion || 0), 0);
+  const interestIncome = advanceInterestIncome + periodicInterestIncome;
   const otherIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
   const totalRevenue = interestIncome + otherIncome;
 
@@ -92,11 +99,15 @@ export async function generateBalanceSheetReport() {
     prisma.partner.findMany({ where: { status: "ACTIVE" } }),
   ]);
 
-  // Authoritative Cash-in-Hand from General Ledger (code 1010), falling back to cashAccount
-  const cashInHand = ledgerCashAccount ? ledgerCashAccount.balance : (cashAccount?.currentBalance || 0);
+  // Authoritative Cash-in-Hand and metrics synchronized from getDashboardFinancialStats
+  const dashStats = await getDashboardFinancialStats();
+  const cashInHand = dashStats.kpis.availableCash;
   const bankTotal = bankAccounts.reduce((sum, b) => sum + b.currentBalance, 0);
   const loansReceivable = activeLoans.reduce((sum, l) => sum + l.principalOutstanding, 0);
-  const interestReceivable = activeLoans.reduce((sum, l) => sum + l.interestOutstanding, 0);
+  const interestReceivable = activeLoans.reduce((sum, l) => {
+    const isAdv = (l as any).loanCalculationType === "ADVANCE_INTEREST" || Boolean((l as any).advanceInterest && (l as any).advanceInterest > 0);
+    return sum + (isAdv ? 0 : (l.interestOutstanding || 0));
+  }, 0);
   const fixedAssetsTotal = assets.reduce((sum, a) => sum + a.currentValue, 0);
 
   const totalAssets = cashInHand + bankTotal + loansReceivable + fixedAssetsTotal;
@@ -143,7 +154,7 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
   };
   const hasDateFilter = startDate || endDate;
 
-  const [cashPayments, cashIncomes, cashInvestments, cashLoans, cashExpenses, cashWithdrawals, cashAccount, ledgerCashAccount] =
+  const [cashPayments, cashIncomes, cashInvestments, cashLoans, cashExpenses, cashWithdrawals, cashAccount, ledgerCashAccount, dashStats] =
     await Promise.all([
       prisma.loanPayment.findMany({
         where: {
@@ -180,6 +191,7 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
       }),
       prisma.cashAccount.findUnique({ where: { id: "main-cash" } }),
       prisma.ledgerAccount.findUnique({ where: { code: "1010" } }),
+      getDashboardFinancialStats(),
     ]);
 
   const collectionsIn = cashPayments.reduce((s, p) => s + p.amount, 0);
@@ -187,13 +199,21 @@ export async function generateCashFlowReport(startDate?: Date, endDate?: Date) {
   const investmentIn = cashInvestments.reduce((s, i) => s + i.amount, 0);
   const totalInflows = collectionsIn + incomeIn + investmentIn;
 
-  const loansDisbursedOut = cashLoans.reduce((s, l) => s + l.principalAmount, 0);
+  const loansDisbursedOut = cashLoans.reduce((s, l) => {
+    const lObj = l as any;
+    const adv = Number(lObj.advanceInterest) || 0;
+    const pFee = Number(lObj.processingFee) || 0;
+    const actualDisbursed = lObj.disbursedAmount && lObj.disbursedAmount > 0
+      ? lObj.disbursedAmount
+      : Math.max(0, l.principalAmount - adv - pFee);
+    return s + actualDisbursed;
+  }, 0);
   const expensesOut = cashExpenses.reduce((s, e) => s + e.amount, 0);
   const withdrawalsOut = cashWithdrawals.reduce((s, w) => s + w.amount, 0);
   const totalOutflows = expensesOut + withdrawalsOut + loansDisbursedOut;
 
   const netCashFlow = totalInflows - totalOutflows;
-  const currentCashBalance = ledgerCashAccount ? ledgerCashAccount.balance : (cashAccount?.currentBalance || 0);
+  const currentCashBalance = dashStats.kpis.availableCash;
 
   return {
     inflows: {

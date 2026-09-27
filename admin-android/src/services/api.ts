@@ -655,31 +655,7 @@ export const api = {
 
   // Full Admin Dashboard Statistics (All 13 KPIs)
   async getStats(): Promise<AdminStatsResponse> {
-    const res = await apiRequest<AdminStatsResponse>("/api/dashboard/stats");
-    if (res && res.kpis) {
-      // BUG 1 FIX: Total Capital must be sourced consistently from existing partner capital/equity definition:
-      // Total Capital = Total Partner Capital + Total Business Profit (retained earnings).
-      // Do NOT add Main Cash (opening balance) to Partner Capital.
-      const partnerCapital = res.kpis.totalPartnerCapital ?? 150000;
-      const profit = res.kpis.totalBusinessProfit ?? 0;
-      res.kpis.totalCapital = partnerCapital + profit;
-
-      // BUG 2 FIX: Available Cash must use authoritative Main Cash / cash ledger balance:
-      // In double-entry accounting: Cash = Partner Investments (Cash In) + Collections - Loans Disbursed - Expenses - Withdrawals.
-      // At baseline (0 loans, 0 expenses, 0 received): 150,000 + 0 - 0 = 150,000.
-      const cashInflows = (res.kpis.totalPartnerInvestment ?? partnerCapital) + (res.kpis.totalMoneyReceived ?? 0);
-      const cashOutflows = (res.kpis.totalMoneyGiven ?? 0) + (res.kpis.totalExpenses ?? 0) + (res.kpis.totalPartnerWithdrawal ?? 0);
-      const authoritativeCash = cashInflows - cashOutflows;
-      
-      // If server returned double-counted cash (e.g. 300,000) or exceeds authoritative ledger flow, normalize
-      if (res.kpis.availableCash === 300000 || res.kpis.availableCash > authoritativeCash) {
-        res.kpis.availableCash = authoritativeCash;
-      }
-      if (res.kpis.totalBusinessAssets === 300000 || res.kpis.totalBusinessAssets > (authoritativeCash + (res.kpis.bankBalance ?? 0) + (res.kpis.totalPrincipalOutstanding ?? 0))) {
-        res.kpis.totalBusinessAssets = authoritativeCash + (res.kpis.bankBalance ?? 0) + (res.kpis.totalPrincipalOutstanding ?? 0);
-      }
-    }
-    return res;
+    return await apiRequest<AdminStatsResponse>("/api/dashboard/stats");
   },
 
   // Partners Module
@@ -1104,19 +1080,25 @@ export const api = {
     // Return authoritative cash position without triggering mutating server GET /api/cash-book
     try {
       const stats = await this.getStats();
-      const cashBal = stats.kpis?.availableCash ?? 150000;
+      const cashBal = stats.kpis?.availableCash ?? 0;
+      const totalInvestment = stats.kpis?.totalPartnerInvestment ?? 0;
+      const totalCollections = stats.kpis?.totalMoneyReceived ?? 0;
+      // totalOut = everything that leaves the safe (actual cash disbursed + expenses + withdrawals)
+      // availableCash = totalIn - totalOut, so totalOut = totalIn - availableCash
+      const totalIn = totalInvestment + totalCollections;
+      const totalOut = Math.max(0, totalIn - cashBal);
       return {
-        openingBalance: 150000,
+        openingBalance: 0,
         currentBalance: cashBal,
-        totalIn: stats.kpis?.totalPartnerInvestment ?? 150000,
-        totalOut: (stats.kpis?.totalMoneyGiven ?? 0) + (stats.kpis?.totalExpenses ?? 0),
+        totalIn,
+        totalOut,
         entries: [],
       };
     } catch {
       return {
-        openingBalance: 150000,
-        currentBalance: 150000,
-        totalIn: 150000,
+        openingBalance: 0,
+        currentBalance: 0,
+        totalIn: 0,
         totalOut: 0,
         entries: [],
       };

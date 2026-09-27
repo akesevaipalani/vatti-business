@@ -80,7 +80,13 @@ export async function GET(req: Request) {
       customer: {
         name: loan.customer.name,
         mobile: loan.customer.mobile,
-        address: [loan.customer.address, loan.customer.city].filter(Boolean).join(", "),
+        address: (() => {
+          const a = (loan.customer.address || "").trim();
+          const c = (loan.customer.city || "").trim();
+          if (!a) return c || "—";
+          if (!c || a.toLowerCase().includes(c.toLowerCase())) return a;
+          return `${a}, ${c}`;
+        })(),
         customerId: loan.customer.customerCode,
       },
       principalAmount: loan.principalAmount,

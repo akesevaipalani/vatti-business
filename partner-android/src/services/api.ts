@@ -601,6 +601,7 @@ export const api = {
           code: user?.partnerId || "PRT",
         },
         stats: {
+          availableCash: 0,
           todayCollectionsCount: todayRes.items?.length || 0,
           todayCollectionAmount: todayRes.totalCollected || 0,
           pendingCollectionsCount: pendingRes.totalPendingInstallments || 0,

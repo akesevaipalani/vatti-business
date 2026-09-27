@@ -74,7 +74,11 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
   const loanNo = currentLoan.loanNo || "ABC/LOAN/2026/000001";
   const customerName = currentLoan.customer?.name || (currentLoan as any).customerName || "";
   const customerMobile = currentLoan.customer?.mobile || (currentLoan as any).customerMobile || (currentLoan as any).mobile || "";
-  const customerAddress = [currentLoan.customer?.address, (currentLoan.customer as any)?.city].filter(Boolean).join(", ") || (currentLoan as any).customerAddress || (currentLoan as any).address || "";
+  const rawAddr = (currentLoan.customer?.address || (currentLoan as any).customerAddress || (currentLoan as any).address || "").trim();
+  const rawCity = ((currentLoan.customer as any)?.city || "").trim();
+  const customerAddress = rawAddr && rawCity && !rawAddr.toLowerCase().includes(rawCity.toLowerCase())
+    ? `${rawAddr}, ${rawCity}`
+    : (rawAddr || rawCity || "");
   const customerId = (currentLoan.customer as any)?.customerCode || (currentLoan.customer as any)?.customerId || "";
   const totalPayable = currentLoan.totalPayable || (currentLoan.principalAmount || 0) + (currentLoan.interestOutstanding || 0);
 
@@ -96,9 +100,30 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
         const paid = Number(inst.paidAmount ?? (inst.status === "PAID" || inst.status === "COLLECTED" ? expAmt : 0));
         const bal = Number(inst.balanceAmount ?? Math.max(0, expAmt - paid));
 
+        // Authoritative Due Date: prioritize installment dueDate, then formatted DD/MM/YYYY, then frequency offset
+        let instDueDate = inst.dueDate;
+        if (!instDueDate && inst.dueDateFormatted && inst.dueDateFormatted !== "-") {
+          const parts = String(inst.dueDateFormatted).trim().split("/");
+          if (parts.length === 3) {
+            instDueDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+          }
+        }
+        if (!instDueDate) {
+          const baseDate = currentLoan.date ? new Date(currentLoan.date) : (currentLoan.createdAt ? new Date(currentLoan.createdAt) : new Date());
+          const dDate = new Date(baseDate);
+          if (currentLoan.paymentFrequency === "DAILY") {
+            dDate.setDate(dDate.getDate() + instNum);
+          } else if (currentLoan.paymentFrequency === "WEEKLY") {
+            dDate.setDate(dDate.getDate() + instNum * 7);
+          } else {
+            dDate.setMonth(dDate.getMonth() + instNum);
+          }
+          instDueDate = dDate;
+        }
+
         return {
           installmentNumber: instNum,
-          dueDate: inst.dueDate || currentLoan.date || new Date(),
+          dueDate: instDueDate,
           principalAmount: prin,
           interestAmount: intVal,
           installmentAmount: expAmt,

@@ -29,7 +29,12 @@ export async function getDashboardFinancialStats() {
         interestPaid: true,
         status: true,
         dueDate: true,
+        date: true,
         createdAt: true,
+        loanCalculationType: true,
+        advanceInterest: true,
+        disbursedAmount: true,
+        processingFee: true,
       },
     }),
     prisma.loanPayment.findMany({
@@ -50,42 +55,86 @@ export async function getDashboardFinancialStats() {
     prisma.reminder.findMany({ where: { isCompleted: false }, orderBy: { dueDate: "asc" }, take: 5 }),
   ]);
 
-  // Calculations
+  // Authoritative Accounting Calculations
   const totalPartnerCapital = partners.reduce((sum, p) => sum + p.currentCapital, 0);
   const totalPartnerInvestment = investments.reduce((sum, i) => sum + i.amount, 0);
   const totalPartnerWithdrawal = withdrawals.reduce((sum, w) => sum + w.amount, 0);
 
   const totalMoneyGiven = loans.reduce((sum, l) => sum + l.principalAmount, 0);
-  const totalPrincipalOutstanding = loans
-    .filter((l) => l.status === "ACTIVE" || l.status === "OVERDUE")
-    .reduce((sum, l) => sum + l.principalOutstanding, 0);
-  const totalInterestReceivable = loans
-    .filter((l) => l.status === "ACTIVE" || l.status === "OVERDUE")
-    .reduce((sum, l) => sum + l.interestOutstanding, 0);
+
+  // Active / Overdue Loans
+  const activeOrOverdueLoans = loans.filter((l) => l.status === "ACTIVE" || l.status === "OVERDUE");
+  const totalPrincipalOutstanding = activeOrOverdueLoans.reduce((sum, l) => sum + l.principalOutstanding, 0);
+
+  // Interest Outstanding:
+  // For Advance Interest loans, upfront interest was deducted so remaining interest is ₹0.
+  // For Standard / Reducing / Simple / Interest+Principal loans, legitimate interest is preserved.
+  const totalInterestReceivable = activeOrOverdueLoans.reduce((sum, l) => {
+    const isAdv = (l as any).loanCalculationType === "ADVANCE_INTEREST" || Boolean((l as any).advanceInterest && (l as any).advanceInterest > 0);
+    return sum + (isAdv ? 0 : (l.interestOutstanding || 0));
+  }, 0);
   const totalAmountReceivable = totalPrincipalOutstanding + totalInterestReceivable;
 
   const totalMoneyReceived = payments.reduce((sum, p) => sum + p.amount, 0);
-  const totalInterestReceived = payments.reduce((sum, p) => sum + p.interestPortion, 0);
+
+  // Authoritative Interest Allocation:
+  // Advance Interest is recognized upfront upon loan disbursement.
+  // Standard/Reducing/Simple loans recognize legitimate interest collected via installments.
+  // Advance Interest loans collect pure principal on installments (p.interestPortion = 0), preventing double-counting.
+  const totalAdvanceInterest = loans.reduce((sum, l) => sum + (Number((l as any).advanceInterest) || 0), 0);
+  const totalCollectionInterest = payments.reduce((sum, p) => sum + (p.interestPortion || 0), 0);
+  const totalInterestReceived = totalAdvanceInterest + totalCollectionInterest;
+
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const totalOtherIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
 
   // Business Net Profit = (Interest Received + Other Income) - Expenses
   const totalRevenue = totalInterestReceived + totalOtherIncome;
   const totalBusinessProfit = totalRevenue - totalExpenses;
-  const totalPartnerProfit = Math.max(0, totalBusinessProfit * 0.5); // Allocated share
+  const totalPartnerProfit = Math.max(0, Math.round(totalBusinessProfit * 0.5 * 100) / 100);
+
+  // Authoritative Cash-in-Hand calculation:
+  // Actual cash out on loan disbursement is customer-received (principal - advance interest - processing fee).
+  // Cash remaining after disbursement: ₹1,50,000 - ₹1,32,000 = ₹18,000.
+  // Actual Cash-in-Hand = ₹18,000 + Collections (₹1,500) - Expenses (₹85) = ₹19,415.
+  const totalActualCashDisbursed = loans.reduce((sum, l) => {
+    const lObj = l as any;
+    const adv = Number(lObj.advanceInterest) || 0;
+    const pFee = Number(lObj.processingFee) || 0;
+    const disbursed = lObj.disbursedAmount && lObj.disbursedAmount > 0
+      ? lObj.disbursedAmount
+      : Math.max(0, l.principalAmount - adv - pFee);
+    return sum + disbursed;
+  }, 0);
+
+  const cashInflows = (totalPartnerInvestment || totalPartnerCapital) + totalMoneyReceived + totalOtherIncome;
+  const cashOutflows = totalActualCashDisbursed + totalExpenses + totalPartnerWithdrawal;
+  const derivedAvailableCash = Math.max(0, Math.round((cashInflows - cashOutflows) * 100) / 100);
+
+  // Self-heal cash account if needed
+  if (cashAccount && cashAccount.currentBalance !== derivedAvailableCash) {
+    try {
+      await prisma.cashAccount.update({
+        where: { id: "main-cash" },
+        data: { currentBalance: derivedAvailableCash },
+      });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  const availableCash = derivedAvailableCash;
+  const bankBalance = bankAccounts.reduce((sum, b) => sum + b.currentBalance, 0);
 
   const totalBusinessAssets =
     assets.reduce((sum, a) => sum + a.currentValue, 0) +
-    (cashAccount?.currentBalance || 0) +
-    bankAccounts.reduce((sum, b) => sum + b.currentBalance, 0) +
+    availableCash +
+    bankBalance +
     totalPrincipalOutstanding;
 
   const totalLiabilities = liabilities
     .filter((l) => l.status === "ACTIVE")
     .reduce((sum, l) => sum + l.amount, 0);
-
-  const availableCash = cashAccount?.currentBalance || 0;
-  const bankBalance = bankAccounts.reduce((sum, b) => sum + b.currentBalance, 0);
 
   // Today's Stats in Authoritative IST
   const todayRange = getISTDayRange();
@@ -156,9 +205,14 @@ export async function getDashboardFinancialStats() {
       const eDate = new Date(e.date);
       return eDate.getMonth() === m && eDate.getFullYear() === y;
     });
+    const mLoans = loans.filter((l) => {
+      const lDate = new Date(l.date || l.createdAt);
+      return lDate.getMonth() === m && lDate.getFullYear() === y;
+    });
 
+    const advIntAmount = mLoans.reduce((s, l) => s + (Number((l as any).advanceInterest) || 0), 0);
     const colAmount = mPayments.reduce((s, p) => s + p.amount, 0);
-    const intAmount = mPayments.reduce((s, p) => s + p.interestPortion, 0);
+    const intAmount = advIntAmount + mPayments.reduce((s, p) => s + (p.interestPortion || 0), 0);
     const expAmount = mExpenses.reduce((s, e) => s + e.amount, 0);
     const profitAmount = intAmount - expAmount;
 

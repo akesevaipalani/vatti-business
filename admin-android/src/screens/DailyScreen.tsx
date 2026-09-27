@@ -648,6 +648,7 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
           customerName={receiptCustomer?.name}
           mobile={receiptCustomer?.mobile}
           loanNo={receiptLoanNo}
+          currentOutstanding={(receiptPayment as any).currentOutstanding}
         />
       )}
     </div>

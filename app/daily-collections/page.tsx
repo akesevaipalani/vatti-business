@@ -206,8 +206,11 @@ export default function CollectionManagementPage() {
     const dueAmount = item.pendingAmount || item.balance || item.installmentAmount;
     setAmount(String(dueAmount));
 
-    const pPart = item.principal || Math.round(dueAmount * 0.8);
-    const iPart = item.interest || Math.round(dueAmount * 0.2);
+    const isAdvInt = (item as any).loanCalculationType === "ADVANCE_INTEREST" || Boolean((item as any).advanceInterest && (item as any).advanceInterest > 0);
+    const isZeroInterest = isAdvInt || item.interest === 0 || (item as any).interestPortion === 0;
+    const defaultInterest = isZeroInterest ? 0 : Number(item.interest ?? (item as any).interestPortion ?? 0);
+    const pPart = Math.max(0, dueAmount - defaultInterest);
+    const iPart = defaultInterest;
 
     setPrincipalPortion(String(pPart));
     setInterestPortion(String(iPart));
@@ -218,10 +221,18 @@ export default function CollectionManagementPage() {
   const handleAmountChange = (newAmtStr: string) => {
     setAmount(newAmtStr);
     const num = Number(newAmtStr) || 0;
-    const iPart = Math.round(num * 0.2);
-    const pPart = num - iPart;
-    setInterestPortion(String(iPart));
-    setPrincipalPortion(String(pPart));
+    const isAdvInt = (collectTarget as any)?.loanCalculationType === "ADVANCE_INTEREST" || Boolean((collectTarget as any)?.advanceInterest && (collectTarget as any)?.advanceInterest > 0);
+    const isZeroInterest = isAdvInt || !collectTarget || collectTarget.interest === 0 || (collectTarget as any).interestPortion === 0;
+    if (isZeroInterest) {
+      setInterestPortion("0");
+      setPrincipalPortion(String(num));
+    } else {
+      const scheduledInt = Number(collectTarget.interest ?? (collectTarget as any).interestPortion ?? 0);
+      const iPart = Math.min(scheduledInt, num);
+      const pPart = Math.max(0, num - iPart);
+      setInterestPortion(String(iPart));
+      setPrincipalPortion(String(pPart));
+    }
   };
 
   const handleCollectSubmit = async (e: React.FormEvent) => {
@@ -263,6 +274,8 @@ export default function CollectionManagementPage() {
                 mobile: collectTarget.mobile,
                 address: collectTarget.address,
               },
+              previousOutstanding: data.previousOutstanding ?? (data.payment as any)?.previousOutstanding,
+              currentOutstanding: data.currentOutstanding ?? (data.payment as any)?.currentOutstanding,
               totalAmountPaid: data.payment.amount,
               principalPaid: data.payment.principalPortion,
               interestPaid: data.payment.interestPortion,
@@ -304,8 +317,8 @@ export default function CollectionManagementPage() {
         mobile: payment.mobile,
       },
       totalAmountPaid: payment.amount,
-      principalPaid: payment.principal,
-      interestPaid: payment.interest,
+      principalPaid: payment.principalPaid ?? payment.principal ?? (payment as any).principalPortion,
+      interestPaid: payment.interestPaid ?? payment.interest ?? (payment as any).interestPortion,
       paymentMethod: payment.paymentMethod,
     });
     setShowReceiptModal(true);

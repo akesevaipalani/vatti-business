@@ -50,9 +50,26 @@ export async function GET(req: Request) {
       logoUrl: biz?.logoUrl || undefined,
     };
 
-    // Determine current outstanding from the loan
-    const currentOutstanding = (payment.loan.principalOutstanding || 0) + (payment.loan.interestOutstanding || 0);
-    const previousOutstanding = currentOutstanding + payment.principalPortion + payment.interestPortion;
+    // Determine cumulative payments prior to this payment for accurate historical progression
+    const allPayments = await prisma.loanPayment.findMany({
+      where: { loanId: payment.loanId },
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    });
+
+    let paidBefore = 0;
+    for (const p of allPayments) {
+      if (p.id === payment.id) break;
+      paidBefore += p.amount;
+    }
+
+    const isAdvanceInterest = payment.loan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((payment.loan as any).advanceInterest && (payment.loan as any).advanceInterest > 0);
+
+    const totalPayable = payment.loan.totalPayable && payment.loan.totalPayable > 0
+      ? payment.loan.totalPayable
+      : (payment.loan.principalAmount + (isAdvanceInterest ? 0 : ((payment.loan.interestOutstanding || 0) + (payment.loan.interestPaid || 0))));
+
+    const previousOutstanding = Math.max(0, Math.round((totalPayable - paidBefore) * 100) / 100);
+    const currentOutstanding = Math.max(0, Math.round((previousOutstanding - payment.amount) * 100) / 100);
 
     // Find installment number if applied
     let appliedInstallment = await prisma.loanInstallment.findFirst({
@@ -85,7 +102,13 @@ export async function GET(req: Request) {
       customer: {
         name: payment.customer.name,
         mobile: payment.customer.mobile,
-        address: [payment.customer.address, payment.customer.city].filter(Boolean).join(", "),
+        address: (() => {
+          const a = (payment.customer.address || "").trim();
+          const c = (payment.customer.city || "").trim();
+          if (!a) return c || "—";
+          if (!c || a.toLowerCase().includes(c.toLowerCase())) return a;
+          return `${a}, ${c}`;
+        })(),
       },
       previousOutstanding,
       principalPaid: payment.principalPortion,

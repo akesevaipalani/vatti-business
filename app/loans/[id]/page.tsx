@@ -163,9 +163,23 @@ export default function LoanDetailPage({
     if (!data?.loan) return;
     const defaultAmt = data.loan.installmentAmount || 2000;
     setAmount(String(defaultAmt));
-    const iPart = Math.round(defaultAmt * 0.2);
+
+    const isAdvInt = data.loan.loanCalculationType === "ADVANCE_INTEREST" || (data.loan.interestOutstanding || 0) <= 0;
+    let iPart = 0;
+    if (!isAdvInt) {
+      const nextUnpaid = data.loan.installments?.find(
+        (i) => i.status !== "COLLECTED" && (i.paidAmount || 0) < i.installmentAmount
+      );
+      if (nextUnpaid && nextUnpaid.interestPortion > 0) {
+        const remInstInterest = Math.max(0, nextUnpaid.interestPortion - (nextUnpaid as any).interestPaid || 0);
+        iPart = Math.min(remInstInterest, Math.min(data.loan.interestOutstanding || 0, defaultAmt));
+      } else {
+        iPart = Math.min(data.loan.interestOutstanding || 0, defaultAmt);
+      }
+    }
+
     setInterestPortion(String(iPart));
-    setPrincipalPortion(String(defaultAmt - iPart));
+    setPrincipalPortion(String(Math.max(0, defaultAmt - iPart)));
     setPaymentMethod("CASH");
     setNotes("Installment Payment");
     setErrorMsg("");
@@ -176,9 +190,24 @@ export default function LoanDetailPage({
   const handleAmountChange = (newAmtStr: string) => {
     setAmount(newAmtStr);
     const num = Number(newAmtStr) || 0;
-    const iPart = Math.round(num * 0.2);
-    setInterestPortion(String(iPart));
-    setPrincipalPortion(String(num - iPart));
+    const isAdvInt = data?.loan?.loanCalculationType === "ADVANCE_INTEREST" || (data?.loan?.interestOutstanding || 0) <= 0;
+    if (isAdvInt) {
+      setInterestPortion("0");
+      setPrincipalPortion(String(num));
+    } else {
+      const nextUnpaid = data?.loan?.installments?.find(
+        (i) => i.status !== "COLLECTED" && (i.paidAmount || 0) < i.installmentAmount
+      );
+      let iPart = 0;
+      if (nextUnpaid && nextUnpaid.interestPortion > 0) {
+        const remInstInterest = Math.max(0, nextUnpaid.interestPortion - (nextUnpaid as any).interestPaid || 0);
+        iPart = Math.min(remInstInterest, Math.min(data?.loan?.interestOutstanding || 0, num));
+      } else {
+        iPart = Math.min(data?.loan?.interestOutstanding || 0, num);
+      }
+      setInterestPortion(String(iPart));
+      setPrincipalPortion(String(Math.max(0, num - iPart)));
+    }
   };
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
@@ -214,8 +243,16 @@ export default function LoanDetailPage({
             customer: {
               name: loan?.customer.name || "",
               mobile: loan?.customer.mobile || "",
-              address: [loan?.customer.address, loan?.customer.city].filter(Boolean).join(", "),
+              address: (() => {
+                const a = (loan?.customer.address || "").trim();
+                const c = (loan?.customer.city || "").trim();
+                if (!a) return c || "—";
+                if (!c || a.toLowerCase().includes(c.toLowerCase())) return a;
+                return `${a}, ${c}`;
+              })(),
             },
+            previousOutstanding: d.previousOutstanding ?? (p as any).previousOutstanding,
+            currentOutstanding: d.currentOutstanding ?? (p as any).currentOutstanding,
             totalAmountPaid: p.amount,
             principalPaid: p.principalPortion,
             interestPaid: p.interestPortion,
@@ -287,7 +324,7 @@ export default function LoanDetailPage({
     );
   }
 
-  const isAdvanceInterest = loan.loanCalculationType === "ADVANCE_INTEREST";
+  const isAdvanceInterest = loan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((loan as any).advanceInterest && (loan as any).advanceInterest > 0);
   const isInterestPrincipal = loan.loanCalculationType === "INTEREST_PRINCIPAL";
 
   const calculationTypeDisplay = isAdvanceInterest
@@ -308,7 +345,7 @@ export default function LoanDetailPage({
     ? loan.totalPayable
     : (loan.principalAmount + (isAdvanceInterest ? 0 : (loan.interestOutstanding + loan.interestPaid)));
 
-  const totalOutstandingAmt = loan.principalOutstanding + loan.interestOutstanding;
+  const totalOutstandingAmt = loan.principalOutstanding + (isAdvanceInterest ? 0 : loan.interestOutstanding);
 
   // Determine Next Due Date from first unpaid installment
   const nextUnpaidInst = loan.installments?.find(
@@ -872,8 +909,12 @@ ABC FINANCE | Contact: +91 96008 71898`;
                     type="number"
                     value={principalPortion}
                     onChange={(e) => setPrincipalPortion(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs font-mono font-bold"
+                    readOnly={isAdvanceInterest}
+                    className={`w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 ${isAdvanceInterest ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 cursor-not-allowed" : "bg-white dark:bg-slate-700"} text-xs font-mono font-bold`}
                   />
+                  {isAdvanceInterest && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold block mt-0.5">100% Principal Recovery</span>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
@@ -881,10 +922,14 @@ ABC FINANCE | Contact: +91 96008 71898`;
                   </label>
                   <input
                     type="number"
-                    value={interestPortion}
-                    onChange={(e) => setInterestPortion(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-xs font-mono font-bold text-amber-600"
+                    value={isAdvanceInterest ? 0 : interestPortion}
+                    onChange={(e) => !isAdvanceInterest && setInterestPortion(e.target.value)}
+                    disabled={isAdvanceInterest}
+                    className={`w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 ${isAdvanceInterest ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed" : "bg-white dark:bg-slate-700 text-amber-600"} text-xs font-mono font-bold`}
                   />
+                  {isAdvanceInterest && (
+                    <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Deducted upfront</span>
+                  )}
                 </div>
               </div>
 
