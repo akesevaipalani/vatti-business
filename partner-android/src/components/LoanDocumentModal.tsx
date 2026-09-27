@@ -47,10 +47,23 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
   const [printError, setPrintError] = useState<string | null>(null);
 
   const [activeLoan, setActiveLoan] = useState<LoanDetail | null>(loan);
+  const [docData, setDocData] = useState<LoanDocumentData | null>(null);
 
   useEffect(() => {
     if (loan) {
       setActiveLoan(loan);
+      const loanIdentifier = loan.id || loan.loanNo;
+      if (loanIdentifier) {
+        api.getLoanDocumentData(loanIdentifier)
+          .then((res) => {
+            if (res?.success && res?.document && res.document.schedule?.length > 0) {
+              setDocData(res.document);
+            }
+          })
+          .catch((err) => {
+            console.warn("Could not load backend document data:", err);
+          });
+      }
       if (loan.id && (!loan.customer || !loan.installments || loan.installments.length === 0)) {
         api.getLoan(loan.id).then((res) => {
           if (res?.loan) {
@@ -90,6 +103,7 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
       : [];
 
     let installments: any[] = [];
+    const baseDate = currentLoan.date ? new Date(currentLoan.date) : (currentLoan.createdAt ? new Date(currentLoan.createdAt) : new Date());
 
     if (rawList.length > 0) {
       installments = rawList.map((inst: any, idx: number) => {
@@ -101,15 +115,18 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
         const bal = Number(inst.balanceAmount ?? Math.max(0, expAmt - paid));
 
         // Authoritative Due Date: prioritize installment dueDate, then formatted DD/MM/YYYY, then frequency offset
-        let instDueDate = inst.dueDate;
-        if (!instDueDate && inst.dueDateFormatted && inst.dueDateFormatted !== "-") {
-          const parts = String(inst.dueDateFormatted).trim().split("/");
-          if (parts.length === 3) {
-            instDueDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        let instDueDate: string | Date = inst.dueDate;
+        const isIdenticalToLoanDate = instDueDate && instNum > 1 && new Date(instDueDate).toDateString() === baseDate.toDateString();
+
+        if (!instDueDate || isIdenticalToLoanDate) {
+          if (inst.dueDateFormatted && inst.dueDateFormatted !== "-") {
+            const parts = String(inst.dueDateFormatted).trim().split("/");
+            if (parts.length === 3) {
+              instDueDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            }
           }
         }
-        if (!instDueDate) {
-          const baseDate = currentLoan.date ? new Date(currentLoan.date) : (currentLoan.createdAt ? new Date(currentLoan.createdAt) : new Date());
+        if (!instDueDate || (instNum > 1 && new Date(instDueDate).toDateString() === baseDate.toDateString())) {
           const dDate = new Date(baseDate);
           if (currentLoan.paymentFrequency === "DAILY") {
             dDate.setDate(dDate.getDate() + instNum);
@@ -138,7 +155,6 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
       const expAmt = currentLoan.installmentAmount || (totalPayable / count);
       const prinPerInst = (currentLoan.principalAmount || 0) / count;
       const intPerInst = Math.max(0, totalPayable - (currentLoan.principalAmount || 0)) / count;
-      const baseDate = currentLoan.date ? new Date(currentLoan.date) : (currentLoan.createdAt ? new Date(currentLoan.createdAt) : new Date());
 
       for (let i = 1; i <= count; i++) {
         const dDate = new Date(baseDate);
@@ -189,13 +205,32 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
     };
   };
 
+  const getAuthoritativeData = async (): Promise<LoanDocumentData> => {
+    if (docData && docData.schedule && docData.schedule.length > 0) {
+      return docData;
+    }
+    const loanIdentifier = currentLoan.id || currentLoan.loanNo;
+    if (loanIdentifier) {
+      try {
+        const res = await api.getLoanDocumentData(loanIdentifier);
+        if (res?.success && res?.document && res.document.schedule?.length > 0) {
+          setDocData(res.document);
+          return res.document;
+        }
+      } catch (err) {
+        console.warn("Could not fetch remote document on download:", err);
+      }
+    }
+    return buildLoanData();
+  };
+
   const handleDownloadPdf = async () => {
     try {
       setDownloading(true);
       setDownloadError(null);
       setDownloadSuccess(null);
       setPrintError(null);
-      const data = buildLoanData();
+      const data = await getAuthoritativeData();
       const doc = await generateLoanDocumentPdf(data);
       const safeNo = loanNo.replace(/[^a-zA-Z0-9_-]/g, "_");
       await downloadPdf(doc, `${safeNo}_Sanction_Order.pdf`);
@@ -218,7 +253,7 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
       setPrinting(true);
       setPrintError(null);
       setDownloadError(null);
-      const data = buildLoanData();
+      const data = await getAuthoritativeData();
       const doc = await generateLoanDocumentPdf(data);
       const safeNo = loanNo.replace(/[^a-zA-Z0-9_-]/g, "_");
       await printPdf(doc, `${safeNo}_Sanction_Order.pdf`);
