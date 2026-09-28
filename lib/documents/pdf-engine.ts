@@ -18,12 +18,12 @@ export interface CompanyProfile {
 
 export const DEFAULT_COMPANY_PROFILE: CompanyProfile = {
   name: "ABC FINANCE",
-  phone: "+91 96008 71898",
-  email: "contact@vattibusiness.com",
-  address: "123, Gandhi Road, Main Bazaar",
-  city: "Chennai",
+  phone: "9600871898",
+  email: "akesevaipalani@gmail.com",
+  address: "Mill Road, Sanmugapuram",
+  city: "Palani",
   state: "Tamil Nadu",
-  pincode: "600001",
+  pincode: "624601",
   gstin: "33AAAAA0000A1Z5",
   pan: "ABCDE1234F",
 };
@@ -36,6 +36,8 @@ export interface InstallmentScheduleItem {
   installmentAmount: number;
   paidAmount: number;
   balanceAmount: number;
+  installmentBalance?: number;
+  loanOutstanding?: number;
   status: string; // PENDING, COLLECTED, PARTIALLY_PAID, OVERDUE
 }
 
@@ -146,7 +148,7 @@ export function generateLoanDocumentPdf(data: LoanDocumentData): jsPDF {
   doc.setTextColor(71, 85, 105); // slate-600
   const addressLine = [company.address, company.city, company.state, company.pincode].filter(Boolean).join(", ");
   doc.text(addressLine, headerLeft, 21);
-  doc.text(`Phone: ${company.phone} | Email: ${company.email || "support@abcfinance.com"}`, headerLeft, 25.5);
+  doc.text(`Phone: ${company.phone} | Email: ${company.email || "akesevaipalani@gmail.com"}`, headerLeft, 25.5);
   if (company.gstin) {
     doc.text(`GSTIN: ${company.gstin} | PAN: ${company.pan || "-"}`, headerLeft, 30);
   }
@@ -373,21 +375,34 @@ export function generateLoanDocumentPdf(data: LoanDocumentData): jsPDF {
   doc.text("COMPLETE REPAYMENT SCHEDULE", margin, scheduleHeaderY);
 
   // Build Schedule Table Data (Strictly matching Installment No, Due Date, Expected Amount, Principal, Interest, Paid Amount, Balance, Status)
-  const tableRows = data.schedule.map((item) => [
-    String(item.installmentNumber),
-    formatDDMMYYYY(item.dueDate),
-    formatIndianCurrency(item.installmentAmount, false),
-    formatIndianCurrency(item.principalAmount, false),
-    formatIndianCurrency(item.interestAmount, false),
-    formatIndianCurrency(item.paidAmount, false),
-    formatIndianCurrency(item.balanceAmount, false),
-    item.status.replace("_", " "),
-  ]);
+  const tableRows = data.schedule.map((item) => {
+    const loanOut = (item as any).projectedBalance !== undefined
+      ? (item as any).projectedBalance
+      : (item as any).remainingPrincipal !== undefined
+      ? (item as any).remainingPrincipal
+      : (item as any).loanOutstandingAfterInstallment !== undefined
+      ? (item as any).loanOutstandingAfterInstallment
+      : (item as any).cumulativePrincipalOutstanding !== undefined
+      ? (item as any).cumulativePrincipalOutstanding
+      : item.balanceAmount !== undefined
+      ? item.balanceAmount
+      : item.loanOutstanding;
+    return [
+      String(item.installmentNumber),
+      formatDDMMYYYY(item.dueDate),
+      formatIndianCurrency(item.installmentAmount, false),
+      formatIndianCurrency(item.principalAmount, false),
+      formatIndianCurrency(item.interestAmount, false),
+      formatIndianCurrency(item.paidAmount, false),
+      formatIndianCurrency(loanOut, false),
+      item.status.replace("_", " "),
+    ];
+  });
 
   autoTable(doc, {
     startY: scheduleHeaderY + 2.5,
     margin: { left: margin, right: margin, bottom: 25 },
-    head: [["Inst #", "Due Date", "Expected Amount (Rs)", "Principal (Rs)", "Interest (Rs)", "Paid (Rs)", "Balance (Rs)", "Status"]],
+    head: [["Inst #", "Due Date", "Expected (Rs)", "Principal (Rs)", "Interest (Rs)", "Paid (Rs)", "Balance (Rs)", "Status"]],
     body: tableRows,
     theme: "striped",
     styles: {
@@ -404,12 +419,12 @@ export function generateLoanDocumentPdf(data: LoanDocumentData): jsPDF {
     },
     columnStyles: {
       0: { halign: "center", cellWidth: 14 },
-      1: { halign: "center", cellWidth: 24 },
-      2: { halign: "right", cellWidth: 26 },
+      1: { halign: "center", cellWidth: 22 },
+      2: { halign: "right", cellWidth: 25 },
       3: { halign: "right", cellWidth: 22 },
       4: { halign: "right", cellWidth: 22 },
       5: { halign: "right", cellWidth: 22 },
-      6: { halign: "right", cellWidth: 24 },
+      6: { halign: "right", cellWidth: 26, fontStyle: "bold" },
       7: { halign: "center" },
     },
     didParseCell: (hookData) => {
@@ -533,7 +548,7 @@ export function generateCollectionReceiptPdf(data: CollectionReceiptData): jsPDF
   doc.setTextColor(71, 85, 105);
   const addressLine = [company.address, company.city, company.state, company.pincode].filter(Boolean).join(", ");
   doc.text(addressLine, headerLeft, 24);
-  doc.text(`Phone: ${company.phone} | Email: ${company.email || "support@abcfinance.com"}`, headerLeft, 29);
+  doc.text(`Phone: ${company.phone} | Email: ${company.email || "akesevaipalani@gmail.com"}`, headerLeft, 29);
   if (company.gstin || company.pan) {
     const taxLine = [company.gstin ? `GSTIN: ${company.gstin}` : "", company.pan ? `PAN: ${company.pan}` : ""].filter(Boolean).join(" | ");
     doc.text(taxLine, headerLeft, 33.5);
@@ -635,9 +650,9 @@ export function generateCollectionReceiptPdf(data: CollectionReceiptData): jsPDF
   const tableY = gridTop + 42;
   const breakdownRows = [
     ["1", "Previous Outstanding Balance", formatIndianCurrency(data.previousOutstanding)],
-    ["2", "Principal Portion Paid", formatIndianCurrency(data.principalPaid)],
-    ["3", "Interest Portion Paid", formatIndianCurrency(data.interestPaid)],
-    ...(data.otherCharges ? [["4", "Other Fees / Late Charges", formatIndianCurrency(data.otherCharges)]] : []),
+    ["2", "Principal Component Credited", formatIndianCurrency(data.principalPaid)],
+    ["3", "Interest Component Credited", formatIndianCurrency(data.interestPaid)],
+    ...(data.otherCharges ? [["4", "Other Fees / Penal Charges", formatIndianCurrency(data.otherCharges)]] : []),
   ];
 
   autoTable(doc, {
@@ -752,10 +767,11 @@ Your payment has been successfully received.
 • *Receipt No:* ${data.receiptNo}
 • *Loan No:* ${data.loanNo}
 • *Collection Date:* ${paymentDate}${instText}
-• *Amount Paid:* ₹${Math.round(data.totalAmountPaid).toLocaleString("en-IN")}
-• *Principal:* ₹${Math.round(data.principalPaid).toLocaleString("en-IN")}
-• *Interest:* ₹${Math.round(data.interestPaid).toLocaleString("en-IN")}${chargesText}
-• *Outstanding:* ₹${Math.round(data.currentOutstanding).toLocaleString("en-IN")}
+• *Previous Outstanding Balance:* ₹${Math.round(data.previousOutstanding).toLocaleString("en-IN")}
+• *Principal Component Credited:* ₹${Math.round(data.principalPaid).toLocaleString("en-IN")}
+• *Interest Component Credited:* ₹${Math.round(data.interestPaid).toLocaleString("en-IN")}${chargesText}
+• *Total Amount Received:* ₹${Math.round(data.totalAmountPaid).toLocaleString("en-IN")}
+• *Remaining Outstanding Balance:* ₹${Math.round(data.currentOutstanding).toLocaleString("en-IN")}
 • *Payment Mode:* ${data.paymentMethod}
 
 Thank you.

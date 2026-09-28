@@ -46,7 +46,7 @@ export interface LoanCalculationResult {
   schedule: ScheduleItem[];
 }
 
-import { toISTDateString, parseISTDate, getTodayIST } from "@/lib/date";
+import { toISTDateString, parseISTDate, getTodayIST } from "../utils/date";
 
 function getDueDateForInstallment(startDate: Date, frequency: "DAILY" | "WEEKLY" | "MONTHLY", index: number): string {
   const istStr = toISTDateString(startDate);

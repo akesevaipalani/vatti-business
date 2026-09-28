@@ -74,6 +74,27 @@ export async function GET(req: Request) {
       ? l.disbursedAmount
       : Math.max(0, loan.principalAmount - (l.advanceInterest || 0) - (loan.processingFee || 0));
 
+    const isAdvInt = l.loanCalculationType === "ADVANCE_INTEREST" || Boolean(l.advanceInterest && l.advanceInterest > 0);
+    const loanPrincipal = Number(loan.principalAmount || 0);
+    const totPayable = loan.totalPayable && loan.totalPayable > 0
+      ? loan.totalPayable
+      : (loanPrincipal + (isAdvInt ? 0 : ((loan.interestOutstanding || 0) + (loan.interestPaid || 0))));
+    const baseBalanceTarget = isAdvInt ? loanPrincipal : totPayable;
+
+    const sortedInsts = [...(loan.installments || [])].sort((a, b) => a.installmentNumber - b.installmentNumber);
+    let cumulativeScheduledPrincipal = 0;
+    const instBalMap = new Map<number, { paid: number; instBal: number; projectedBalance: number; status: string }>();
+    for (const inst of sortedInsts) {
+      const paid = Number(inst.paidAmount || 0);
+      const expAmt = Number(inst.installmentAmount || 0);
+      const prinPortion = Number(inst.principalPortion || (isAdvInt ? expAmt : (loanPrincipal / (loan.totalInstallments || 1))));
+      cumulativeScheduledPrincipal += prinPortion;
+      const instBal = Math.max(0, Math.round((expAmt - paid) * 100) / 100);
+      const projectedBal = Math.max(0, Math.round((loanPrincipal - cumulativeScheduledPrincipal) * 100) / 100);
+      const status = inst.status || (instBal === 0 ? "COLLECTED" : (paid > 0 ? "PARTIALLY_PAID" : "PENDING"));
+      instBalMap.set(inst.installmentNumber, { paid, instBal, projectedBalance: projectedBal, status });
+    }
+
     const docData: LoanDocumentData = {
       loanNo: loan.loanNo,
       date: loan.date,
@@ -102,17 +123,29 @@ export async function GET(req: Request) {
       installmentAmount: loan.installmentAmount,
       totalInterest: Math.max(0, loan.totalPayable - loan.principalAmount) || (l.advanceInterest || 0),
       totalPayable: loan.totalPayable,
-      schedule: loan.installments && loan.installments.length > 0
-        ? loan.installments.map((inst) => ({
-            installmentNumber: inst.installmentNumber,
-            dueDate: inst.dueDate,
-            principalAmount: inst.principalPortion,
-            interestAmount: inst.interestPortion,
-            installmentAmount: inst.installmentAmount,
-            paidAmount: inst.paidAmount,
-            balanceAmount: Math.max(0, inst.installmentAmount - inst.paidAmount),
-            status: inst.status,
-          }))
+      schedule: sortedInsts.length > 0
+        ? sortedInsts.map((inst) => {
+            const b = instBalMap.get(inst.installmentNumber);
+            const isAdv = isAdvInt;
+            const defaultPrin = Number(inst.principalPortion || (isAdv ? inst.installmentAmount : (loanPrincipal / (loan.totalInstallments || 1))));
+            const projectedBal = b ? b.projectedBalance : Math.max(0, Math.round((loanPrincipal - inst.installmentNumber * defaultPrin) * 100) / 100);
+            return {
+              installmentNumber: inst.installmentNumber,
+              dueDate: inst.dueDate,
+              principalAmount: inst.principalPortion,
+              interestAmount: inst.interestPortion,
+              installmentAmount: inst.installmentAmount,
+              paidAmount: b ? b.paid : inst.paidAmount,
+              installmentBalance: b ? b.instBal : Math.max(0, inst.installmentAmount - inst.paidAmount),
+              balanceAmount: projectedBal,
+              projectedBalance: projectedBal,
+              loanOutstanding: projectedBal,
+              loanOutstandingAfterInstallment: projectedBal,
+              cumulativePrincipalOutstanding: projectedBal,
+              remainingPrincipal: projectedBal,
+              status: b ? b.status : inst.status,
+            };
+          })
         : calculateLoan({
             principal: loan.principalAmount,
             loanCalculationType: (l.loanCalculationType as any) || "STANDARD",
@@ -124,16 +157,26 @@ export async function GET(req: Request) {
             paymentFrequency: loan.paymentFrequency as any,
             totalInstallments: loan.totalInstallments,
             startDate: loan.date,
-          }).schedule.map((item) => ({
-            installmentNumber: item.installmentNumber,
-            dueDate: new Date(item.dueDate),
-            principalAmount: item.principalPortion,
-            interestAmount: item.interestPortion,
-            installmentAmount: item.installmentAmount,
-            paidAmount: 0,
-            balanceAmount: item.installmentAmount,
-            status: "PENDING",
-          })),
+          }).schedule.map((item) => {
+            const b = instBalMap.get(item.installmentNumber);
+            const projectedBal = b ? b.projectedBalance : item.remainingPrincipal;
+            return {
+              installmentNumber: item.installmentNumber,
+              dueDate: new Date(item.dueDate),
+              principalAmount: item.principalPortion,
+              interestAmount: item.interestPortion,
+              installmentAmount: item.installmentAmount,
+              paidAmount: b ? b.paid : 0,
+              installmentBalance: b ? b.instBal : item.installmentAmount,
+              balanceAmount: projectedBal,
+              projectedBalance: projectedBal,
+              loanOutstanding: projectedBal,
+              loanOutstandingAfterInstallment: projectedBal,
+              cumulativePrincipalOutstanding: projectedBal,
+              remainingPrincipal: projectedBal,
+              status: b ? b.status : "PENDING",
+            };
+          }),
       company,
     };
 

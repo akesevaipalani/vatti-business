@@ -60,7 +60,17 @@ async function buildDesktop() {
   run('npx prisma generate');
 
   // 3. Build Next.js in standalone mode
-  console.log('\n[3/5] Compiling Next.js Standalone bundle...');
+  console.log('\n[3/5] Cleaning stale bundles and compiling Next.js Standalone bundle...');
+  const nextDir = path.join(rootDir, '.next');
+  if (fs.existsSync(nextDir)) {
+    try {
+      fs.rmSync(path.join(nextDir, 'standalone'), { recursive: true, force: true });
+      fs.rmSync(path.join(nextDir, 'server'), { recursive: true, force: true });
+      fs.rmSync(path.join(nextDir, 'static'), { recursive: true, force: true });
+    } catch (e) {
+      console.warn('Note: Could not cleanly purge partial .next subfolders:', e.message);
+    }
+  }
   run('npm run build');
 
   // 4. Copy static assets to standalone
@@ -118,6 +128,9 @@ async function buildDesktop() {
   if (fs.existsSync(stale7z)) {
     try { fs.unlinkSync(stale7z); } catch {}
   }
+  try {
+    execSync('powershell -Command "Get-Process | Where-Object { $_.ProcessName -like \'*VATTI BUSINESS*\' } | Stop-Process -Force -ErrorAction SilentlyContinue"');
+  } catch {}
   run('npx electron-builder --win');
 
   console.log('\n========================================================================');

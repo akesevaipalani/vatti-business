@@ -76,6 +76,12 @@ export interface CollectedTodayPaymentItem {
   collectionDate: string;
   actualPaymentDate: string;
   status: "PAID";
+  address?: string;
+  previousOutstanding?: number;
+  currentOutstanding?: number;
+  remainingOutstanding?: number;
+  loan?: any;
+  customer?: any;
 }
 
 export interface ScheduleSummary {
@@ -311,11 +317,14 @@ export default function CollectionManagementPage() {
       loanNo: payment.loanNo,
       collectionDate: payment.collectionDate,
       actualPaymentDate: payment.actualPaymentDate,
-      installmentNumber: payment.installmentNo,
+      installmentNumber: payment.installmentNo || payment.installmentNumber,
       customer: {
         name: payment.customerName,
         mobile: payment.mobile,
+        address: payment.address || (payment.customer as any)?.address,
       },
+      previousOutstanding: (payment as any).previousOutstanding,
+      currentOutstanding: (payment as any).currentOutstanding,
       totalAmountPaid: payment.amount,
       principalPaid: payment.principalPaid ?? payment.principal ?? (payment as any).principalPortion,
       interestPaid: payment.interestPaid ?? payment.interest ?? (payment as any).interestPortion,

@@ -109,6 +109,11 @@ export interface InstallmentItem {
   interest?: number;
   interestPortion: number;
   paidAmount: number;
+  installmentBalance?: number;
+  loanOutstanding?: number;
+  loanOutstandingAfterInstallment?: number;
+  cumulativePrincipalOutstanding?: number;
+  balanceAmount?: number;
   remainingAmount?: number;
   status: "PENDING" | "COLLECTED" | "PARTIALLY_PAID" | "OVERDUE";
   actualPaymentDate?: string | null;
@@ -157,6 +162,7 @@ export interface CollectedTodayPaymentItem {
   customerName: string;
   customerCode?: string;
   mobile: string;
+  address?: string;
   installmentNumber?: number | null;
   installmentNo?: number | null;
   collectionDate: string;
@@ -165,9 +171,18 @@ export interface CollectedTodayPaymentItem {
   amountCollected: number;
   principalPortion: number;
   interestPortion: number;
+  principal?: number;
+  principalPaid?: number;
+  interest?: number;
+  interestPaid?: number;
   paymentMethod: string;
   status: "PAID";
   notes?: string | null;
+  previousOutstanding?: number;
+  currentOutstanding?: number;
+  remainingOutstanding?: number;
+  loan?: any;
+  customer?: any;
 }
 
 export interface CollectionScheduleResponse {
@@ -251,6 +266,10 @@ export interface LoanPayment {
   paymentMethod: string;
   referenceNo?: string | null;
   notes?: string | null;
-  customer?: { id: string; name: string; mobile: string; address?: string; city?: string };
-  loan?: { id: string; loanNo: string; principalAmount: number };
+  customer?: { id?: string; name: string; mobile?: string; address?: string; city?: string };
+  loan?: { id?: string; loanNo: string; principalAmount?: number; [key: string]: any };
+  previousOutstanding?: number;
+  currentOutstanding?: number;
+  remainingOutstanding?: number;
+  address?: string;
 }

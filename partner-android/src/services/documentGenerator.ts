@@ -36,6 +36,10 @@ export interface InstallmentScheduleItem {
   installmentAmount: number;
   paidAmount: number;
   balanceAmount: number;
+  installmentBalance?: number;
+  loanOutstanding?: number;
+  loanOutstandingAfterInstallment?: number;
+  cumulativePrincipalOutstanding?: number;
   status: string;
 }
 
@@ -302,16 +306,29 @@ export async function generateLoanDocumentPdf(data: LoanDocumentData): Promise<j
     ["#", "Due Date", "Principal (Rs.)", "Interest (Rs.)", "Due (Rs.)", "Paid (Rs.)", "Balance (Rs.)", "Status"],
   ];
 
-  const tableRows = data.schedule.map((item) => [
-    String(item.installmentNumber),
-    formatDDMMYYYY(item.dueDate),
-    formatIndianCurrency(item.principalAmount, false),
-    formatIndianCurrency(item.interestAmount, false),
-    formatIndianCurrency(item.installmentAmount, false),
-    formatIndianCurrency(item.paidAmount, false),
-    formatIndianCurrency(item.balanceAmount, false),
-    item.status,
-  ]);
+  const tableRows = data.schedule.map((item) => {
+    const loanOut = (item as any).projectedBalance !== undefined
+      ? (item as any).projectedBalance
+      : (item as any).remainingPrincipal !== undefined
+      ? (item as any).remainingPrincipal
+      : (item as any).loanOutstandingAfterInstallment !== undefined
+      ? (item as any).loanOutstandingAfterInstallment
+      : (item as any).cumulativePrincipalOutstanding !== undefined
+      ? (item as any).cumulativePrincipalOutstanding
+      : item.balanceAmount !== undefined
+      ? item.balanceAmount
+      : item.loanOutstanding;
+    return [
+      String(item.installmentNumber),
+      formatDDMMYYYY(item.dueDate),
+      formatIndianCurrency(item.principalAmount, false),
+      formatIndianCurrency(item.interestAmount, false),
+      formatIndianCurrency(item.installmentAmount, false),
+      formatIndianCurrency(item.paidAmount, false),
+      formatIndianCurrency(loanOut, false),
+      item.status,
+    ];
+  });
 
   autoTable(doc, {
     startY: currentY,
@@ -340,13 +357,13 @@ export async function generateLoanDocumentPdf(data: LoanDocumentData): Promise<j
     },
     columnStyles: {
       0: { halign: "center", cellWidth: 10 },
-      1: { halign: "center", cellWidth: 23 },
-      2: { halign: "right", cellWidth: 25 },
-      3: { halign: "right", cellWidth: 25 },
-      4: { halign: "right", cellWidth: 25, fontStyle: "bold" },
-      5: { halign: "right", cellWidth: 24 },
-      6: { halign: "right", cellWidth: 25 },
-      7: { halign: "center", cellWidth: 25 },
+      1: { halign: "center", cellWidth: 22 },
+      2: { halign: "right", cellWidth: 24 },
+      3: { halign: "right", cellWidth: 22 },
+      4: { halign: "right", cellWidth: 24, fontStyle: "bold" },
+      5: { halign: "right", cellWidth: 22 },
+      6: { halign: "right", cellWidth: 26, fontStyle: "bold" },
+      7: { halign: "center", cellWidth: 24 },
     },
     didDrawPage: (hookData) => {
       const pageNumber = (doc.internal as any).getCurrentPageInfo().pageNumber;

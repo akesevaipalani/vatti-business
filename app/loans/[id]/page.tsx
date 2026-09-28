@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, use, useCallback } from "react";
+import React, { useState, useEffect, use, useCallback, useMemo } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -44,6 +44,8 @@ interface LoanPaymentItem {
   interestPortion: number;
   amount: number;
   notes: string | null;
+  previousOutstanding?: number;
+  currentOutstanding?: number;
 }
 
 interface ScheduleItem {
@@ -53,6 +55,11 @@ interface ScheduleItem {
   principalPortion: number;
   interestPortion: number;
   remainingPrincipal: number;
+  paidAmount?: number;
+  installmentBalance?: number;
+  loanOutstanding?: number;
+  balanceAmount?: number;
+  status?: string;
 }
 
 interface LoanDetailCustomer {
@@ -96,6 +103,9 @@ interface LoanDetail {
     principalPortion: number;
     interestPortion: number;
     paidAmount: number;
+    installmentBalance?: number;
+    loanOutstanding?: number;
+    balanceAmount?: number;
     status: string;
     actualPaymentDate?: string | null;
   }>;
@@ -133,6 +143,38 @@ export default function LoanDetailPage({
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null);
   const [receiptInitialData, setReceiptInitialData] = useState<Partial<ReceiptData> | null>(null);
+
+  const loan = data?.loan;
+  const schedule = useMemo(() => data?.schedule || [], [data?.schedule]);
+
+  // Authoritative Cumulative Scheduled Loan Principal Projection map for the schedule
+  // Projected Principal Outstanding After This Installment is Paid:
+  // MAX(0, loanPrincipal - cumulativeScheduledPrincipalThroughThisInstallment)
+  const scheduleBalanceMap = useMemo(() => {
+    if (!loan) return new Map<number, number>();
+    const isAdv = loan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((loan as any).advanceInterest && (loan as any).advanceInterest > 0);
+    const loanPrincipal = Number(loan.principalAmount || 0);
+
+    const map = new Map<number, number>();
+    const scheduleList = schedule || [];
+    const allNumbers = Array.from(new Set([
+      ...(scheduleList.map((s) => s.installmentNumber)),
+      ...(loan.installments?.map((i) => i.installmentNumber) || []),
+    ])).sort((a, b) => a - b);
+
+    let cumulativeScheduledPrincipal = 0;
+    for (const num of allNumbers) {
+      const inst = loan.installments?.find((i) => i.installmentNumber === num);
+      const sItem = scheduleList.find((s) => s.installmentNumber === num);
+      const expectedAmt = Number(inst?.installmentAmount ?? (sItem as any)?.installmentAmount ?? loan.installmentAmount ?? 0);
+      const prinPortion = Number(inst?.principalPortion ?? (sItem as any)?.principalPortion ?? (isAdv ? expectedAmt : (loanPrincipal / (loan.totalInstallments || 1))));
+      cumulativeScheduledPrincipal += prinPortion;
+
+      const projectedBal = Math.max(0, Math.round((loanPrincipal - cumulativeScheduledPrincipal) * 100) / 100);
+      map.set(num, projectedBal);
+    }
+    return map;
+  }, [loan, schedule]);
 
   const fetchLoan = useCallback(async () => {
     setLoading(true);
@@ -307,8 +349,7 @@ export default function LoanDetailPage({
     );
   }
 
-  const loan = data?.loan;
-  const schedule = data?.schedule || [];
+
 
   if (!loan) {
     return (
@@ -358,6 +399,8 @@ export default function LoanDetailPage({
     ? formatDate(nextUnpaidInst.dueDate)
     : (loan.status === "CLOSED" ? "Completed" : "None");
 
+
+
   return (
     <div className="space-y-6 animate-fadeIn pb-16">
       {/* Top action bar */}
@@ -399,7 +442,7 @@ Installment Amount: Rs. ${loan.installmentAmount?.toLocaleString("en-IN")}
 Next Due Date: ${nextDueDateStr}
 --------------------------------
 Your official loan sanction document with complete installment schedule has been generated.
-ABC FINANCE | Contact: +91 96008 71898`;
+ABC FINANCE | Mill Road, Sanmugapuram, Palani - 624601 | Phone: 9600871898 | Email: akesevaipalani@gmail.com`;
               const phone = loan.customer?.mobile || "";
               const clean = phone.replace(/\D/g, "");
               const waPhone = clean.length === 10 ? `91${clean}` : clean;
@@ -452,6 +495,15 @@ ABC FINANCE | Contact: +91 96008 71898`;
             <p className="text-xs text-slate-500">
               Loan Account Statement & Amortization Schedule • Mobile: <span className="font-semibold text-slate-700 dark:text-slate-300">{loan.customer?.mobile}</span> • Sanction Date: <span className="font-semibold text-slate-700 dark:text-slate-300">{formatDate(loan.date)}</span>
             </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500 font-medium">
+              <span className="font-bold text-slate-700 dark:text-slate-300">ABC FINANCE</span>
+              <span>•</span>
+              <span>Mill Road, Sanmugapuram, Palani - 624601</span>
+              <span>•</span>
+              <span>Phone: 9600871898</span>
+              <span>•</span>
+              <span>Email: akesevaipalani@gmail.com</span>
+            </div>
           </div>
 
           <div className="text-right">
@@ -635,11 +687,22 @@ ABC FINANCE | Contact: +91 96008 71898`;
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
                 {schedule.map((item: ScheduleItem) => {
                   const inst = loan.installments?.find((i) => i.installmentNumber === item.installmentNumber);
-                  const isPaid = inst?.status === "COLLECTED";
-                  const isPartial = inst?.status === "PARTIALLY_PAID";
+                  const isPaid = inst?.status === "COLLECTED" || (inst && inst.paidAmount >= item.installmentAmount);
+                  const isPartial = inst?.status === "PARTIALLY_PAID" || (inst && inst.paidAmount > 0 && inst.paidAmount < item.installmentAmount);
                   const isOverdue = inst?.status === "OVERDUE" || (inst ? (isPastDateIST(inst.dueDate) && !isPaid) : false);
-                  const paidAmt = inst?.paidAmount || 0;
-                  const balanceAmt = inst ? Math.max(0, item.installmentAmount - paidAmt) : item.installmentAmount;
+                  const paidAmt = inst?.paidAmount ?? (item as any).paidAmount ?? 0;
+                  // Authoritative projected principal outstanding after this installment is paid:
+                  // MAX(0, loanPrincipal - (installmentNumber * principalPortionPerInstallment))
+                  const scheduledPrinPortion = Number(
+                    item.principalPortion ||
+                    inst?.principalPortion ||
+                    (isAdvanceInterest ? item.installmentAmount : (loan.principalAmount / (loan.totalInstallments || 1)))
+                  );
+                  const projectedBal = (item as any)?.projectedBalance !== undefined
+                    ? Number((item as any).projectedBalance)
+                    : scheduleBalanceMap.get(item.installmentNumber) !== undefined
+                    ? scheduleBalanceMap.get(item.installmentNumber)!
+                    : Math.max(0, Math.round((loan.principalAmount - item.installmentNumber * scheduledPrinPortion) * 100) / 100);
 
                   return (
                     <tr key={item.installmentNumber} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
@@ -659,8 +722,8 @@ ABC FINANCE | Contact: +91 96008 71898`;
                       <td className="py-3 px-4 text-right font-bold text-emerald-600">
                         {formatCurrency(paidAmt)}
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-800 dark:text-slate-200">
-                        {formatCurrency(balanceAmt)}
+                      <td className="py-3 px-4 text-right font-bold text-indigo-700 dark:text-indigo-400">
+                        {formatCurrency(projectedBal)}
                       </td>
                       <td className="py-3 px-4 text-center font-sans">
                         {isPaid && (
@@ -708,9 +771,11 @@ ABC FINANCE | Contact: +91 96008 71898`;
                     <th className="py-3 px-4">Receipt / Payment No</th>
                     <th className="py-3 px-4">Date</th>
                     <th className="py-3 px-4">Method</th>
+                    <th className="py-3 px-4 text-right">Previous Balance</th>
                     <th className="py-3 px-4 text-right">Principal</th>
                     <th className="py-3 px-4 text-right">Interest</th>
                     <th className="py-3 px-4 text-right">Total Paid</th>
+                    <th className="py-3 px-4 text-right">Remaining Balance</th>
                     <th className="py-3 px-4 text-center">Receipt Actions</th>
                   </tr>
                 </thead>
@@ -727,6 +792,9 @@ ABC FINANCE | Contact: +91 96008 71898`;
                         </span>
                       </td>
                       <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">
+                        {p.previousOutstanding !== undefined ? formatCurrency(p.previousOutstanding) : "—"}
+                      </td>
+                      <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">
                         {formatCurrency(p.principalPortion)}
                       </td>
                       <td className="py-3 px-4 text-right text-amber-600">
@@ -734,6 +802,9 @@ ABC FINANCE | Contact: +91 96008 71898`;
                       </td>
                       <td className="py-3 px-4 text-right font-black text-emerald-600 text-sm">
                         {formatCurrency(p.amount)}
+                      </td>
+                      <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-slate-100">
+                        {p.currentOutstanding !== undefined ? formatCurrency(p.currentOutstanding) : "—"}
                       </td>
                       <td className="py-3 px-4 text-center font-sans">
                         <div className="flex items-center justify-center gap-1.5">
@@ -756,19 +827,26 @@ ABC FINANCE | Contact: +91 96008 71898`;
                           <button
                             type="button"
                             onClick={() => {
-                              const text = `*ABC FINANCE - PAYMENT RECEIPT*
---------------------------------
-Receipt No: ${p.paymentNo}
-Loan No: ${loan.loanNo}
-Customer: ${loan.customer?.name}
-Date: ${formatDate(p.date)}
-Amount Paid: Rs. ${p.amount?.toLocaleString("en-IN")}
-Principal Credited: Rs. ${p.principalPortion?.toLocaleString("en-IN")}
-Interest Credited: Rs. ${p.interestPortion?.toLocaleString("en-IN")}
-Payment Mode: ${p.paymentMethod}
---------------------------------
+                              const prevOut = p.previousOutstanding !== undefined ? `\n• *Previous Outstanding Balance:* ₹${Math.round(p.previousOutstanding).toLocaleString("en-IN")}` : "";
+                              const remOut = p.currentOutstanding !== undefined ? `\n• *Remaining Outstanding Balance:* ₹${Math.round(p.currentOutstanding).toLocaleString("en-IN")}` : "";
+                              const text = `*ABC FINANCE – COLLECTION RECEIPT*
+_VATTI BUSINESS – Private Business Management System_
+
+Dear *${loan.customer?.name}*,
+
+Your payment has been successfully received.
+
+*Receipt Details:*
+• *Receipt No:* ${p.paymentNo}
+• *Loan No:* ${loan.loanNo}
+• *Collection Date:* ${formatDate(p.date)}${prevOut}
+• *Principal Component Credited:* ₹${Math.round(p.principalPortion || 0).toLocaleString("en-IN")}
+• *Interest Component Credited:* ₹${Math.round(p.interestPortion || 0).toLocaleString("en-IN")}
+• *Total Amount Received:* ₹${Math.round(p.amount).toLocaleString("en-IN")}${remOut}
+• *Payment Mode:* ${p.paymentMethod}
+
 Thank you for your payment! Please preserve this receipt for your records.
-ABC FINANCE | Contact: +91 96008 71898`;
+ABC FINANCE | Mill Road, Sanmugapuram, Palani - 624601 | Phone: 9600871898 | Email: akesevaipalani@gmail.com`;
                               const phone = loan.customer?.mobile || "";
                               const clean = phone.replace(/\D/g, "");
                               const waPhone = clean.length === 10 ? `91${clean}` : clean;
@@ -842,6 +920,13 @@ ABC FINANCE | Contact: +91 96008 71898`;
           </div>
         </div>
       )}
+
+      {/* Official Contact Footer for Loan Account Statement & Print Schedule */}
+      <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 space-y-1">
+        <div className="font-bold text-slate-700 dark:text-slate-300">ABC FINANCE • OFFICIAL LOAN ACCOUNT STATEMENT</div>
+        <div>Address: Mill Road, Sanmugapuram, Palani - 624601 • Phone: 9600871898 • Email: akesevaipalani@gmail.com</div>
+        <div className="text-[10px] text-slate-400">All schedule balances represent the projected principal outstanding following timely installment payments.</div>
+      </div>
 
       {/* COLLECT PAYMENT MODAL */}
       {payModal && (

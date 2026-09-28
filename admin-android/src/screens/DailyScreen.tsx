@@ -50,7 +50,7 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
 
   // Receipt Modal State
   const [receiptPayment, setReceiptPayment] = useState<LoanPayment | null>(null);
-  const [receiptCustomer, setReceiptCustomer] = useState<{ name: string; mobile?: string } | null>(null);
+  const [receiptCustomer, setReceiptCustomer] = useState<{ name: string; mobile?: string; address?: string } | null>(null);
   const [receiptLoanNo, setReceiptLoanNo] = useState("");
 
   const fetchCollections = useCallback(
@@ -152,6 +152,7 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
       setReceiptCustomer({
         name: selectedItem.customerName,
         mobile: selectedItem.customerMobile || selectedItem.mobile,
+        address: selectedItem.address || (result.payment as any)?.address || (result.payment as any)?.customer?.address,
       });
       setReceiptLoanNo(selectedItem.loanNo);
 
@@ -177,10 +178,17 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
       date: item.date,
       paymentMethod: item.paymentMethod as any,
       notes: item.notes || undefined,
+      previousOutstanding: item.previousOutstanding,
+      currentOutstanding: item.currentOutstanding,
+      remainingOutstanding: item.remainingOutstanding || item.currentOutstanding,
+      address: item.address,
+      loan: item.loan,
+      customer: item.customer,
     });
     setReceiptCustomer({
       name: item.customerName,
       mobile: item.mobile,
+      address: item.address || item.customer?.address,
     });
     setReceiptLoanNo(item.loanNo);
   };
@@ -647,7 +655,9 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
           payment={receiptPayment}
           customerName={receiptCustomer?.name}
           mobile={receiptCustomer?.mobile}
+          address={receiptCustomer?.address}
           loanNo={receiptLoanNo}
+          previousOutstanding={(receiptPayment as any).previousOutstanding}
           currentOutstanding={(receiptPayment as any).currentOutstanding}
         />
       )}

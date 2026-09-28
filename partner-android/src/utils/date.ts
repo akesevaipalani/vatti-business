@@ -57,3 +57,26 @@ export function formatISTDateTime(dateInput: Date | string | number | null | und
     hour12: true,
   }).format(d);
 }
+
+/**
+ * Parses any date string (YYYY-MM-DD), Date, or timestamp into an authoritative IST Date object.
+ * Fixes UTC day-shift bugs when clients submit backdated or today dates (e.g. '2026-09-24').
+ * Sets the time to midday (12:00:00) IST so the calendar date is invariant across all UTC/IST conversions.
+ */
+export function parseISTDate(dateInput?: Date | string | number | null): Date {
+  if (!dateInput) return new Date();
+  if (dateInput instanceof Date) {
+    if (isNaN(dateInput.getTime())) return new Date();
+    return dateInput;
+  }
+  const str = String(dateInput).trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split("-").map(Number);
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    // 12:00:00 IST = 06:30:00 UTC
+    const middayUtcMs = Date.UTC(y, m - 1, d, 12, 0, 0, 0) - IST_OFFSET_MS;
+    return new Date(middayUtcMs);
+  }
+  const parsed = new Date(dateInput);
+  return isNaN(parsed.getTime()) ? new Date() : parsed;
+}

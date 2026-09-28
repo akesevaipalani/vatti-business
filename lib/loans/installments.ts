@@ -61,6 +61,7 @@ export interface CollectedTodayPaymentItem {
   customerName: string;
   customerCode: string;
   mobile: string;
+  address?: string;
   installmentNumber?: number | null;
   installmentNo?: number | null;
   collectionDate: string; // DD/MM/YYYY, hh:mm A
@@ -69,9 +70,19 @@ export interface CollectedTodayPaymentItem {
   amountCollected: number;
   principalPortion: number;
   interestPortion: number;
+  principal?: number;
+  principalPaid?: number;
+  interest?: number;
+  interestPaid?: number;
   paymentMethod: string;
   status: "PAID";
   notes?: string | null;
+  previousOutstanding?: number;
+  currentOutstanding?: number;
+  remainingOutstanding?: number;
+  loanCalculationType?: string;
+  loan?: any;
+  customer?: any;
 }
 
 export interface PendingInstallmentItem extends InstallmentScheduleItem {
@@ -467,12 +478,52 @@ export async function getCollectionSchedule(
   // TAB 2: Today's Pending = Installments due today where paidAmount < installmentAmount
   const todayPending: InstallmentScheduleItem[] = todayDue.filter((item) => item.pendingAmount > 0);
 
+  // Pre-fetch all payments for loans in todayPayments to calculate exact loan-level previous & remaining outstanding
+  const distinctLoanIds = Array.from(new Set(todayPayments.map((p) => p.loanId)));
+  const allLoanPayments = distinctLoanIds.length > 0
+    ? await prisma.loanPayment.findMany({
+        where: { loanId: { in: distinctLoanIds } },
+        orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+      })
+    : [];
+
+  const paymentsByLoan = new Map<string, typeof allLoanPayments>();
+  for (const lp of allLoanPayments) {
+    if (!paymentsByLoan.has(lp.loanId)) paymentsByLoan.set(lp.loanId, []);
+    paymentsByLoan.get(lp.loanId)!.push(lp);
+  }
+
   // TAB 3: Collected Today = Payments recorded on target date
   const collectedToday: CollectedTodayPaymentItem[] = todayPayments.map((p) => {
     // Parse installment number if noted in description or notes
     let instNo: number | null = null;
     const match = (p.notes || "").match(/#(\d+)/);
     if (match) instNo = Number(match[1]);
+
+    const loanPayments = paymentsByLoan.get(p.loanId) || [];
+    let paidBefore = 0;
+    for (const prior of loanPayments) {
+      if (prior.id === p.id) break;
+      paidBefore += prior.amount;
+    }
+
+    const isAdvInt = p.loan?.loanCalculationType === "ADVANCE_INTEREST" || Boolean((p.loan as any)?.advanceInterest && (p.loan as any)?.advanceInterest > 0);
+    const totPayable = p.loan?.totalPayable && p.loan.totalPayable > 0
+      ? p.loan.totalPayable
+      : (p.loan?.principalAmount ? (p.loan.principalAmount + (isAdvInt ? 0 : ((p.loan.interestOutstanding || 0) + (p.loan.interestPaid || 0)))) : 0);
+
+    const prevOutstanding = totPayable > 0 ? Math.max(0, Math.round((totPayable - paidBefore) * 100) / 100) : 0;
+    const currOutstanding = Math.max(0, Math.round((prevOutstanding - p.amount) * 100) / 100);
+
+    const custAddr = (() => {
+      const a = (p.customer?.address || "").trim();
+      const c = (p.customer?.city || "").trim();
+      if (a && c) {
+        if (a.toLowerCase().includes(c.toLowerCase())) return a;
+        return `${a}, ${c}`;
+      }
+      return a || c || "";
+    })();
 
     return {
       id: p.id,
@@ -483,6 +534,7 @@ export async function getCollectionSchedule(
       customerName: p.customer?.name || "",
       customerCode: (p.customer as any)?.customerCode || "",
       mobile: p.customer?.mobile || "",
+      address: custAddr,
       installmentNumber: instNo,
       installmentNo: instNo,
       collectionDate: formatISTDateTime(p.date),
@@ -498,7 +550,15 @@ export async function getCollectionSchedule(
       paymentMethod: p.paymentMethod,
       status: "PAID",
       notes: p.notes,
+      previousOutstanding: prevOutstanding,
+      currentOutstanding: currOutstanding,
+      remainingOutstanding: currOutstanding,
       loanCalculationType: p.loan?.loanCalculationType || "STANDARD",
+      loan: p.loan,
+      customer: p.customer ? {
+        ...p.customer,
+        address: custAddr || p.customer.address,
+      } : undefined,
     };
   });
 
@@ -706,7 +766,16 @@ export async function recordCollectionForInstallment(data: {
     paymentDate = new Date(utcMs);
   }
 
-  const previousOutstanding = Math.round(((loan.principalOutstanding || 0) + (isAdvanceInterest ? 0 : (loan.interestOutstanding || 0))) * 100) / 100;
+  // Authoritative loan-level outstanding balance before this payment
+  const priorPayments = await prisma.loanPayment.findMany({
+    where: { loanId: loan.id },
+  });
+  const paidBefore = priorPayments.reduce((s, p) => s + p.amount, 0);
+  const totalPayable = loan.totalPayable && loan.totalPayable > 0
+    ? loan.totalPayable
+    : (loan.principalAmount + (isAdvanceInterest ? 0 : ((loan.interestOutstanding || 0) + (loan.interestPaid || 0))));
+  const previousOutstanding = Math.max(0, Math.round((totalPayable - paidBefore) * 100) / 100);
+  const remainingOutstanding = Math.max(0, Math.round((previousOutstanding - amount) * 100) / 100);
 
   const newPaidAmount = installment.paidAmount + amount;
   const isFullyPaid = newPaidAmount >= installment.installmentAmount;
@@ -729,7 +798,6 @@ export async function recordCollectionForInstallment(data: {
   // 2. Update Loan outstanding balances
   const newPrincipalOutstanding = Math.max(0, Math.round((loan.principalOutstanding - pPortion) * 100) / 100);
   const newInterestOutstanding = Math.max(0, Math.round((loan.interestOutstanding - iPortion) * 100) / 100);
-  const remainingOutstanding = Math.max(0, Math.round((previousOutstanding - amount) * 100) / 100);
   const isLoanClosed = newPrincipalOutstanding <= 0 && (isAdvanceInterest || newInterestOutstanding <= 0);
 
   const updatedLoan = await prisma.loan.update({
@@ -757,6 +825,10 @@ export async function recordCollectionForInstallment(data: {
       paymentMethod: paymentMethod || "CASH",
       date: paymentDate,
       notes: notes || `Installment #${installment.installmentNumber} Collection`,
+    },
+    include: {
+      loan: true,
+      customer: true,
     },
   });
 
@@ -799,9 +871,11 @@ export async function recordCollectionForInstallment(data: {
       ...payment,
       previousOutstanding,
       currentOutstanding: remainingOutstanding,
+      remainingOutstanding,
     },
     loan: updatedLoan,
     previousOutstanding,
     currentOutstanding: remainingOutstanding,
+    remainingOutstanding,
   };
 }

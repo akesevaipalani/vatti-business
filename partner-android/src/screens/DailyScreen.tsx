@@ -47,10 +47,11 @@ export const DailyScreen: React.FC = () => {
 
   // Receipt modal state
   const [receiptPayment, setReceiptPayment] = useState<LoanPayment | null>(null);
-  const [receiptCustomer, setReceiptCustomer] = useState<{ name: string; mobile: string; loanNo: string }>({
+  const [receiptCustomer, setReceiptCustomer] = useState<{ name: string; mobile: string; loanNo: string; address?: string }>({
     name: "",
     mobile: "",
     loanNo: "",
+    address: "",
   });
 
   const fetchCollections = useCallback(
@@ -146,11 +147,18 @@ export const DailyScreen: React.FC = () => {
       setCollectingItem(null);
 
       // Open digital receipt modal
-      setReceiptPayment(res.payment);
+      const resolvedAddress = (collectingItem as any).address || (collectingItem as any).customerAddress || (collectingItem as any).city;
+      setReceiptPayment({
+        ...res.payment,
+        previousOutstanding: (res.payment as any).previousOutstanding,
+        currentOutstanding: (res.payment as any).currentOutstanding ?? (res.payment as any).remainingOutstanding,
+        address: (res.payment as any).address || resolvedAddress,
+      } as any);
       setReceiptCustomer({
         name: collectingItem.customerName,
         mobile: collectingItem.mobile,
         loanNo: collectingItem.loanNo,
+        address: resolvedAddress,
       });
 
       // Refresh list
@@ -163,6 +171,7 @@ export const DailyScreen: React.FC = () => {
   };
 
   const handleViewReceipt = (payment: CollectedTodayPaymentItem) => {
+    const resolvedAddress = (payment as any).address || (payment as any).customerAddress || (payment as any).city;
     setReceiptPayment({
       id: payment.id,
       paymentNo: payment.paymentNo,
@@ -174,11 +183,17 @@ export const DailyScreen: React.FC = () => {
       date: payment.date,
       paymentMethod: payment.paymentMethod as any,
       notes: payment.notes || undefined,
-    });
+      previousOutstanding: (payment as any).previousOutstanding,
+      currentOutstanding: (payment as any).currentOutstanding ?? (payment as any).remainingOutstanding,
+      address: resolvedAddress,
+      loan: (payment as any).loan,
+      customer: (payment as any).customer,
+    } as any);
     setReceiptCustomer({
       name: payment.customerName,
       mobile: payment.mobile,
       loanNo: payment.loanNo,
+      address: resolvedAddress,
     });
   };
 
@@ -641,7 +656,9 @@ export const DailyScreen: React.FC = () => {
           payment={receiptPayment}
           customerName={receiptCustomer.name}
           mobile={receiptCustomer.mobile}
+          address={receiptCustomer.address}
           loanNo={receiptCustomer.loanNo}
+          previousOutstanding={(receiptPayment as any).previousOutstanding}
           currentOutstanding={(receiptPayment as any).currentOutstanding}
         />
       )}

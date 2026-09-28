@@ -677,7 +677,15 @@ export const api = {
     processingFee?: number;
     paymentMethod: string;
     startDate: string;
+    date?: string;
+    disbursementDate?: string;
     notes?: string;
+    guarantorName?: string;
+    guarantorMobile?: string;
+    guarantorRelationship?: string;
+    collateralType?: string | null;
+    collateralDescription?: string;
+    collateralEstimatedValue?: number;
   }): Promise<{ success: boolean; loan: LoanDetail }> {
     return apiRequest<{ success: boolean; loan: LoanDetail }>("/api/loans", {
       method: "POST",
@@ -878,6 +886,7 @@ export const api = {
         const match = (p.notes || "").match(/#(\d+)/);
         if (match) instNo = Number(match[1]);
 
+        const addr = p.address || p.customer?.address || p.customer?.city || "";
         return {
           id: p.id,
           paymentNo: p.paymentNo || `RCP-${p.id.substring(0, 6).toUpperCase()}`,
@@ -887,6 +896,7 @@ export const api = {
           customerName: p.customer?.name || "",
           customerCode: p.customer?.code || "",
           mobile: p.customer?.mobile || "",
+          address: addr,
           installmentNumber: instNo,
           installmentNo: instNo,
           collectionDate: formatISTDateTime(p.date) || p.date,
@@ -898,6 +908,14 @@ export const api = {
           paymentMethod: p.paymentMethod || "CASH",
           status: "PAID",
           notes: p.notes || null,
+          previousOutstanding: p.previousOutstanding !== undefined ? Number(p.previousOutstanding) : undefined,
+          currentOutstanding: p.currentOutstanding !== undefined ? Number(p.currentOutstanding) : undefined,
+          remainingOutstanding: p.remainingOutstanding !== undefined ? Number(p.remainingOutstanding) : p.currentOutstanding !== undefined ? Number(p.currentOutstanding) : undefined,
+          loan: p.loan,
+          customer: p.customer ? {
+            ...p.customer,
+            address: addr,
+          } : undefined,
         };
       });
 

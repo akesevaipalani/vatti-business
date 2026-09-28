@@ -108,6 +108,10 @@ export interface Installment {
   interestPortion: number;
   status: "PENDING" | "PAID" | "PARTIAL" | "OVERDUE" | "COLLECTED" | "PARTIALLY_PAID" | string;
   paidAmount: number;
+  installmentBalance?: number;
+  loanOutstanding?: number;
+  loanOutstandingAfterInstallment?: number;
+  cumulativePrincipalOutstanding?: number;
   balanceAmount?: number;
   paidDate?: string;
   actualPaymentDate?: string;
@@ -159,8 +163,12 @@ export interface LoanPayment {
   paymentMethod: "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE";
   referenceNo?: string;
   notes?: string;
-  customer?: { name: string; mobile?: string; city?: string };
-  loan?: { loanNo: string };
+  customer?: { name: string; mobile?: string; city?: string; address?: string };
+  loan?: { loanNo: string; [key: string]: any };
+  previousOutstanding?: number;
+  currentOutstanding?: number;
+  remainingOutstanding?: number;
+  address?: string;
 }
 
 export interface TodayCollectionItem {
@@ -205,6 +213,7 @@ export interface CollectedTodayPaymentItem {
   customerName: string;
   customerCode?: string;
   mobile: string;
+  address?: string;
   installmentNumber?: number | null;
   installmentNo?: number | null;
   collectionDate: string;
@@ -213,9 +222,18 @@ export interface CollectedTodayPaymentItem {
   amountCollected: number;
   principalPortion: number;
   interestPortion: number;
+  principal?: number;
+  principalPaid?: number;
+  interest?: number;
+  interestPaid?: number;
   paymentMethod: string;
   status: "PAID";
   notes?: string | null;
+  previousOutstanding?: number;
+  currentOutstanding?: number;
+  remainingOutstanding?: number;
+  loan?: any;
+  customer?: any;
 }
 
 export interface CollectionScheduleResponse {

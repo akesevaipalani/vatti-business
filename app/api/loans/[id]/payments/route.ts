@@ -83,7 +83,16 @@ export async function POST(
       }
     }
 
-    const previousOutstanding = Math.round(((loan.principalOutstanding || 0) + (isAdvanceInterest ? 0 : (loan.interestOutstanding || 0))) * 100) / 100;
+    // Authoritative loan-level outstanding balance before this payment
+    const priorPayments = await prisma.loanPayment.findMany({
+      where: { loanId: id },
+    });
+    const paidBefore = priorPayments.reduce((s, p) => s + p.amount, 0);
+    const totalPayable = loan.totalPayable && loan.totalPayable > 0
+      ? loan.totalPayable
+      : (loan.principalAmount + (isAdvanceInterest ? 0 : ((loan.interestOutstanding || 0) + (loan.interestPaid || 0))));
+    const previousOutstanding = Math.max(0, Math.round((totalPayable - paidBefore) * 100) / 100);
+    const currentOutstanding = Math.max(0, Math.round((previousOutstanding - totalAmount) * 100) / 100);
 
     // 1. Create Payment record with explicit collection date
     const payment = await prisma.loanPayment.create({
@@ -100,12 +109,15 @@ export async function POST(
         referenceNo,
         notes,
       },
+      include: {
+        loan: true,
+        customer: true,
+      },
     });
 
     // 2. Update Loan outstanding balances
     const newPrincipalOutstanding = Math.max(0, Math.round((loan.principalOutstanding - pPortion) * 100) / 100);
     const newInterestOutstanding = Math.max(0, Math.round((loan.interestOutstanding - iPortion) * 100) / 100);
-    const currentOutstanding = Math.max(0, Math.round((previousOutstanding - totalAmount) * 100) / 100);
     const isFullyPaid = newPrincipalOutstanding <= 0 && (isAdvanceInterest || newInterestOutstanding <= 0);
 
     const updatedLoan = await prisma.loan.update({
@@ -194,10 +206,12 @@ export async function POST(
         ...payment,
         previousOutstanding,
         currentOutstanding,
+        remainingOutstanding: currentOutstanding,
       },
       loan: updatedLoan,
       previousOutstanding,
       currentOutstanding,
+      remainingOutstanding: currentOutstanding,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to record payment";

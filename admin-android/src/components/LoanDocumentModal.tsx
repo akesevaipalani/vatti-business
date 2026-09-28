@@ -104,15 +104,23 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
 
     let installments: any[] = [];
     const baseDate = currentLoan.date ? new Date(currentLoan.date) : (currentLoan.createdAt ? new Date(currentLoan.createdAt) : new Date());
+    const isAdvInt = currentLoan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((currentLoan as any).advanceInterest && (currentLoan as any).advanceInterest > 0);
+    const loanPrincipal = Number(currentLoan.principalAmount || 0);
+    let cumulativeScheduledPrincipal = 0;
 
     if (rawList.length > 0) {
       installments = rawList.map((inst: any, idx: number) => {
         const instNum = inst.installmentNumber ?? inst.installmentNo ?? (idx + 1);
         const expAmt = Number(inst.installmentAmount ?? inst.amount ?? currentLoan.installmentAmount ?? 0);
-        const prin = Number(inst.principalPortion ?? (currentLoan.principalAmount / (currentLoan.totalInstallments || 1)));
+        const prin = Number(inst.principalPortion ?? (isAdvInt ? expAmt : (loanPrincipal / (currentLoan.totalInstallments || 1))));
         const intVal = Number(inst.interestPortion ?? ((totalPayable - currentLoan.principalAmount) / (currentLoan.totalInstallments || 1)));
         const paid = Number(inst.paidAmount ?? (inst.status === "PAID" || inst.status === "COLLECTED" ? expAmt : 0));
-        const bal = Number(inst.balanceAmount ?? Math.max(0, expAmt - paid));
+        const instBal = Number(inst.installmentBalance ?? Math.max(0, expAmt - paid));
+
+        cumulativeScheduledPrincipal += prin;
+        const projectedBalance = (inst.projectedBalance !== undefined && inst.projectedBalance !== null)
+          ? Number(inst.projectedBalance)
+          : Math.max(0, Math.round((loanPrincipal - cumulativeScheduledPrincipal) * 100) / 100);
 
         // Authoritative Due Date: prioritize installment dueDate, then formatted DD/MM/YYYY, then frequency offset
         let instDueDate: string | Date = inst.dueDate;
@@ -145,16 +153,23 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
           interestAmount: intVal,
           installmentAmount: expAmt,
           paidAmount: paid,
-          balanceAmount: bal,
-          status: inst.status || (bal === 0 ? "COLLECTED" : "PENDING"),
+          installmentBalance: instBal,
+          projectedBalance,
+          loanOutstanding: projectedBalance,
+          loanOutstandingAfterInstallment: projectedBalance,
+          cumulativePrincipalOutstanding: projectedBalance,
+          remainingPrincipal: projectedBalance,
+          balanceAmount: projectedBalance,
+          status: inst.status || (instBal === 0 ? "COLLECTED" : "PENDING"),
         };
       });
     } else {
       // Fallback synthesis from authoritative loan date
       const count = currentLoan.totalInstallments || 1;
       const expAmt = currentLoan.installmentAmount || (totalPayable / count);
-      const prinPerInst = (currentLoan.principalAmount || 0) / count;
-      const intPerInst = Math.max(0, totalPayable - (currentLoan.principalAmount || 0)) / count;
+      const prinPerInst = (loanPrincipal || 0) / count;
+      const intPerInst = Math.max(0, totalPayable - (loanPrincipal || 0)) / count;
+      let cumulativeSynthPrin = 0;
 
       for (let i = 1; i <= count; i++) {
         const dDate = new Date(baseDate);
@@ -165,6 +180,8 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
         } else {
           dDate.setMonth(dDate.getMonth() + i);
         }
+        cumulativeSynthPrin += prinPerInst;
+        const projBal = Math.max(0, Math.round((loanPrincipal - cumulativeSynthPrin) * 100) / 100);
         installments.push({
           installmentNumber: i,
           dueDate: dDate,
@@ -172,7 +189,13 @@ export const LoanDocumentModal: React.FC<LoanDocumentModalProps> = ({
           interestAmount: Math.round(intPerInst),
           installmentAmount: Math.round(expAmt),
           paidAmount: 0,
-          balanceAmount: Math.round(expAmt),
+          installmentBalance: Math.round(expAmt),
+          projectedBalance: projBal,
+          loanOutstanding: projBal,
+          loanOutstandingAfterInstallment: projBal,
+          cumulativePrincipalOutstanding: projBal,
+          remainingPrincipal: projBal,
+          balanceAmount: projBal,
           status: "PENDING",
         });
       }

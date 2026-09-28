@@ -88,7 +88,133 @@ export async function GET(
       loan = { ...loan, installments };
     }
 
-    return NextResponse.json({ loan, schedule: calc.schedule });
+    // Enrich loan.payments with exact loan-level previous & remaining outstanding balances
+    if (loan.payments && loan.payments.length > 0) {
+      const isAdvInt = loan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((loan as any).advanceInterest && (loan as any).advanceInterest > 0);
+      const totPayable = loan.totalPayable && loan.totalPayable > 0
+        ? loan.totalPayable
+        : (loan.principalAmount + (isAdvInt ? 0 : ((loan.interestOutstanding || 0) + (loan.interestPaid || 0))));
+
+      const custAddr = (() => {
+        const a = (loan.customer?.address || "").trim();
+        const c = (loan.customer?.city || "").trim();
+        if (a && c) {
+          if (a.toLowerCase().includes(c.toLowerCase())) return a;
+          return `${a}, ${c}`;
+        }
+        return a || c || "";
+      })();
+
+      const chronoPayments = [...loan.payments].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime() || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      let cumulativePaid = 0;
+      const paymentBalances = new Map<string, { previousOutstanding: number; currentOutstanding: number }>();
+      for (const p of chronoPayments) {
+        const prev = totPayable > 0 ? Math.max(0, Math.round((totPayable - cumulativePaid) * 100) / 100) : 0;
+        const curr = Math.max(0, Math.round((prev - p.amount) * 100) / 100);
+        cumulativePaid += p.amount;
+        paymentBalances.set(p.id, { previousOutstanding: prev, currentOutstanding: curr });
+      }
+
+      const currentLoan = loan;
+      loan = {
+        ...currentLoan,
+        payments: currentLoan.payments.map((p) => {
+          const bal = paymentBalances.get(p.id);
+          return {
+            ...p,
+            address: custAddr,
+            previousOutstanding: bal?.previousOutstanding,
+            currentOutstanding: bal?.currentOutstanding,
+            remainingOutstanding: bal?.currentOutstanding,
+            customer: currentLoan.customer ? {
+              name: currentLoan.customer.name,
+              mobile: currentLoan.customer.mobile,
+              address: custAddr,
+              city: currentLoan.customer.city,
+            } : undefined,
+          };
+        }),
+      } as any;
+    }
+    if (!loan) {
+      return NextResponse.json({ error: "Loan not found" }, { status: 404 });
+    }
+    const safeLoan = loan;
+    // Authoritative per-installment cumulative scheduled loan principal projection
+    // Projected Principal Outstanding After This Installment is Paid:
+    // MAX(0, loanPrincipal - cumulativeScheduledPrincipalThroughThisInstallment)
+    const isAdvInt = safeLoan.loanCalculationType === "ADVANCE_INTEREST" || Boolean((safeLoan as any).advanceInterest && (safeLoan as any).advanceInterest > 0);
+    const loanPrincipal = Number(safeLoan.principalAmount || 0);
+
+    const sortedInstallments = [...(safeLoan.installments || [])].sort((a, b) => a.installmentNumber - b.installmentNumber);
+    let cumulativeScheduledPrincipal = 0;
+    const installmentBalanceMap = new Map<number, {
+      paidAmount: number;
+      installmentBalance: number;
+      projectedBalance: number;
+      status: string;
+    }>();
+
+    for (const inst of sortedInstallments) {
+      const paid = Number(inst.paidAmount || 0);
+      const expectedAmt = Number(inst.installmentAmount || 0);
+      const prinPortion = Number(inst.principalPortion || (isAdvInt ? expectedAmt : (loanPrincipal / (safeLoan.totalInstallments || 1))));
+      cumulativeScheduledPrincipal += prinPortion;
+
+      const instBal = Math.max(0, Math.round((expectedAmt - paid) * 100) / 100);
+      const projectedBal = Math.max(0, Math.round((loanPrincipal - cumulativeScheduledPrincipal) * 100) / 100);
+      const status = inst.status || (instBal === 0 ? "COLLECTED" : (paid > 0 ? "PARTIALLY_PAID" : "PENDING"));
+
+      installmentBalanceMap.set(inst.installmentNumber, {
+        paidAmount: paid,
+        installmentBalance: instBal,
+        projectedBalance: projectedBal,
+        status,
+      });
+    }
+
+    const enrichedInstallments = sortedInstallments.map((inst) => {
+      const balInfo = installmentBalanceMap.get(inst.installmentNumber);
+      const isAdv = isAdvInt;
+      const defaultPrin = Number(inst.principalPortion || (isAdv ? inst.installmentAmount : (loanPrincipal / (safeLoan.totalInstallments || 1))));
+      const projectedBal = balInfo ? balInfo.projectedBalance : Math.max(0, Math.round((loanPrincipal - inst.installmentNumber * defaultPrin) * 100) / 100);
+      return {
+        ...inst,
+        paidAmount: balInfo ? balInfo.paidAmount : Number(inst.paidAmount || 0),
+        installmentBalance: balInfo ? balInfo.installmentBalance : Math.max(0, Number(inst.installmentAmount) - Number(inst.paidAmount || 0)),
+        balanceAmount: projectedBal,
+        projectedBalance: projectedBal,
+        loanOutstanding: projectedBal,
+        loanOutstandingAfterInstallment: projectedBal,
+        cumulativePrincipalOutstanding: projectedBal,
+        remainingPrincipal: projectedBal,
+        status: balInfo ? balInfo.status : inst.status,
+      };
+    });
+
+    const enrichedSchedule = calc.schedule.map((item) => {
+      const balInfo = installmentBalanceMap.get(item.installmentNumber);
+      const projectedBal = balInfo ? balInfo.projectedBalance : item.remainingPrincipal;
+      return {
+        ...item,
+        paidAmount: balInfo ? balInfo.paidAmount : 0,
+        installmentBalance: balInfo ? balInfo.installmentBalance : item.installmentAmount,
+        balanceAmount: projectedBal,
+        projectedBalance: projectedBal,
+        loanOutstanding: projectedBal,
+        loanOutstandingAfterInstallment: projectedBal,
+        cumulativePrincipalOutstanding: projectedBal,
+        remainingPrincipal: projectedBal,
+        status: balInfo ? balInfo.status : "PENDING",
+      };
+    });
+
+    const finalLoan = {
+      ...safeLoan,
+      installments: enrichedInstallments,
+    };
+
+    return NextResponse.json({ loan: finalLoan, schedule: enrichedSchedule });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Failed to fetch loan";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -302,7 +302,7 @@ export function CollectionReceiptModal({
       const waPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       const msg =
         waMessage ||
-        `*${(receipt.company?.name || "VATTI BUSINESS").toUpperCase()} – Collection Receipt*\n\nDear *${receipt.customer.name}*,\n\nYour payment has been successfully received.\n\n*Receipt Details:*\n• *Receipt No:* ${receipt.receiptNo}\n• *Loan No:* ${receipt.loanNo}\n• *Collection Date:* ${formatDateDDMMYYYY(receipt.collectionDate)}\n• *Amount Paid:* ₹${formatIndianNumber(receipt.totalAmountPaid)}\n• *Principal:* ₹${formatIndianNumber(receipt.principalPaid)}\n• *Interest:* ₹${formatIndianNumber(receipt.interestPaid)}\n• *Outstanding Balance:* ₹${formatIndianNumber(receipt.currentOutstanding)}\n• *Payment Mode:* ${receipt.paymentMethod}\n\nThank you.\n\n*${receipt.company?.name || "VATTI BUSINESS"}*\nVATTI BUSINESS – Private Business Management System`;
+        `*${(receipt.company?.name || "VATTI BUSINESS").toUpperCase()} – Collection Receipt*\n\nDear *${receipt.customer.name}*,\n\nYour payment has been successfully received.\n\n*Receipt Details:*\n• *Receipt No:* ${receipt.receiptNo}\n• *Loan No:* ${receipt.loanNo}\n• *Collection Date:* ${formatDateDDMMYYYY(receipt.collectionDate)}\n• *Previous Outstanding Balance:* ₹${formatIndianNumber(receipt.previousOutstanding)}\n• *Principal Component Credited:* ₹${formatIndianNumber(receipt.principalPaid)}\n• *Interest Component Credited:* ₹${formatIndianNumber(receipt.interestPaid)}\n• *Total Amount Received:* ₹${formatIndianNumber(receipt.totalAmountPaid)}\n• *Remaining Outstanding Balance:* ₹${formatIndianNumber(receipt.currentOutstanding)}\n• *Payment Mode:* ${receipt.paymentMethod}\n\nThank you.\n\n*${receipt.company?.name || "VATTI BUSINESS"}*\nVATTI BUSINESS – Private Business Management System`;
 
       const directShareUrl = waPhone
         ? `https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`
@@ -560,7 +560,7 @@ export function CollectionReceiptModal({
                     <tr>
                       <td className="py-2 px-3 text-center text-slate-400">2</td>
                       <td className="py-2 px-3 font-sans text-slate-900 font-medium">
-                        Principal Portion Credited
+                        Principal Component Credited
                       </td>
                       <td className="py-2 px-3 text-right font-bold text-slate-900">
                         ₹{formatIndianNumber(receipt.principalPaid)}
@@ -569,7 +569,7 @@ export function CollectionReceiptModal({
                     <tr>
                       <td className="py-2 px-3 text-center text-slate-400">3</td>
                       <td className="py-2 px-3 font-sans text-amber-900 font-medium">
-                        Interest Portion Credited
+                        Interest Component Credited
                       </td>
                       <td className="py-2 px-3 text-right font-bold text-amber-700">
                         ₹{formatIndianNumber(receipt.interestPaid)}
@@ -579,7 +579,7 @@ export function CollectionReceiptModal({
                       <tr>
                         <td className="py-2 px-3 text-center text-slate-400">4</td>
                         <td className="py-2 px-3 font-sans text-slate-700">
-                          Other Charges / Late Fee
+                          Other Fees / Penal Charges
                         </td>
                         <td className="py-2 px-3 text-right text-slate-700">
                           ₹{formatIndianNumber(receipt.otherCharges)}
@@ -602,7 +602,7 @@ export function CollectionReceiptModal({
                 </div>
                 <div className="sm:text-right border-t sm:border-t-0 sm:border-l border-emerald-200 pt-2 sm:pt-0 sm:pl-4">
                   <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-800 block">
-                    REMAINING PRINCIPAL / OUTSTANDING
+                    REMAINING OUTSTANDING BALANCE
                   </span>
                   <span className="text-base font-black font-mono text-slate-900">
                     ₹{formatIndianNumber(receipt.currentOutstanding)}
