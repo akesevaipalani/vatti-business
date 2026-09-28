@@ -251,26 +251,28 @@ export const MoreScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Server Config */}
-          <button
-            onClick={() => setShowServerModal(true)}
-            className="w-full flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition tap-active text-left"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 flex items-center justify-center">
-                <Server className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="font-bold text-slate-800 dark:text-slate-200">
-                  {language === "ta" ? "சேவையக இணைப்பு" : "Server Connection"}
+          {/* Server Config (Developer Only) */}
+          {import.meta.env.DEV && (
+            <button
+              onClick={() => setShowServerModal(true)}
+              className="w-full flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition tap-active text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 flex items-center justify-center">
+                  <Server className="w-4 h-4" />
                 </div>
-                <div className="text-[11px] text-slate-400 truncate max-w-[200px]">
-                  {getServerUrl()}
+                <div>
+                  <div className="font-bold text-slate-800 dark:text-slate-200">
+                    {language === "ta" ? "சேவையக இணைப்பு" : "Server Connection"}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate max-w-[200px]">
+                    {getServerUrl()}
+                  </div>
                 </div>
               </div>
-            </div>
-            <span className="text-slate-400">›</span>
-          </button>
+              <span className="text-slate-400">›</span>
+            </button>
+          )}
         </div>
 
         {/* Logout Button */}
@@ -283,7 +285,7 @@ export const MoreScreen: React.FC = () => {
         </button>
 
         <div className="text-center text-[11px] text-slate-400 pt-2">
-          Vatti Business Android • Phase 1 Build 1.0.0
+          Vatti Business Private Cloud • Partner Mobile v1.2.1 (Build 4)
         </div>
       </div>
 
@@ -480,8 +482,8 @@ export const MoreScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Server Configuration Modal */}
-      {showServerModal && (
+      {/* Server Configuration Modal (Developer Only) */}
+      {import.meta.env.DEV && showServerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100 dark:border-slate-800 space-y-4">
             <div className="flex justify-between items-start">
