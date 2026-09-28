@@ -73,7 +73,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <span className="bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                 👑 ADMIN
               </span>
-              <span className="text-slate-400 text-xs font-medium">VATTI CLOUD v1.3</span>
+              <span className="text-slate-400 text-xs font-medium">VATTI CLOUD v1.5.1</span>
             </div>
             <h1 className="text-xl font-extrabold mt-1 text-white tracking-tight">
               {user?.name || "Admin"}
