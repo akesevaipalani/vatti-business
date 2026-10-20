@@ -70,23 +70,26 @@ if (fs.existsSync(engineSrc)) {
   console.log(`[standalone-assets] Verified query_engine-windows.dll.node in standalone`);
 }
 
-// 4. Copy Prisma schema (enforce SQLite for standalone runtime)
+// 4. Copy Prisma schema (preserve PostgreSQL for cloud production, SQLite only for desktop)
+const isDesktopBuild = process.env.BUILD_TARGET === 'desktop' || process.env.ELECTRON_BUILD === 'true';
 const sqliteSchemaPath = path.join(rootDir, 'prisma', 'schema.sqlite.prisma');
-const schemaSrc = fs.existsSync(sqliteSchemaPath) ? sqliteSchemaPath : path.join(rootDir, 'prisma', 'schema.prisma');
+const schemaSrc = isDesktopBuild && fs.existsSync(sqliteSchemaPath) ? sqliteSchemaPath : path.join(rootDir, 'prisma', 'schema.prisma');
 const schemaDest = path.join(standaloneDir, 'prisma', 'schema.prisma');
 safeCopyFile(schemaSrc, schemaDest);
-console.log(`[standalone-assets] Synced SQLite schema.prisma in standalone`);
+console.log(`[standalone-assets] Synced ${isDesktopBuild ? 'SQLite' : 'PostgreSQL'} schema.prisma in standalone`);
 
 const clientSchemaDest = path.join(standaloneDir, 'node_modules', '.prisma', 'client', 'schema.prisma');
 safeCopyFile(schemaSrc, clientSchemaDest);
-console.log(`[standalone-assets] Synced SQLite schema.prisma into .prisma/client`);
+console.log(`[standalone-assets] Synced ${isDesktopBuild ? 'SQLite' : 'PostgreSQL'} schema.prisma into .prisma/client`);
 
-// 5. Copy pristine template DB if exists
-const dbSrc = path.join(rootDir, 'prisma', 'vatti.db');
-const dbDest = path.join(standaloneDir, 'prisma', 'vatti.db');
-if (fs.existsSync(dbSrc)) {
-  safeCopyFile(dbSrc, dbDest);
-  console.log(`[standalone-assets] Synced template vatti.db in standalone`);
+// 5. Copy pristine template DB if exists (only for desktop offline builds)
+if (isDesktopBuild) {
+  const dbSrc = path.join(rootDir, 'prisma', 'vatti.db');
+  const dbDest = path.join(standaloneDir, 'prisma', 'vatti.db');
+  if (fs.existsSync(dbSrc)) {
+    safeCopyFile(dbSrc, dbDest);
+    console.log(`[standalone-assets] Synced template vatti.db in standalone for desktop build`);
+  }
 }
 
 // 6. Ensure standalone server binds to 0.0.0.0 on container hosts
@@ -101,13 +104,19 @@ if (fs.existsSync(standaloneServerPath)) {
   console.log('[standalone-assets] Ensured standalone server binds to 0.0.0.0 on container hosts');
 }
 
-// 7. Sanitize standalone .env to prevent any PostgreSQL DATABASE_URL leakage
+// 7. Sync root .env into standalone (preserve DATABASE_URL for cloud PostgreSQL production)
+const rootEnvPath = path.join(rootDir, '.env');
 const standaloneEnvPath = path.join(standaloneDir, '.env');
-if (fs.existsSync(standaloneEnvPath)) {
-  let lines = fs.readFileSync(standaloneEnvPath, 'utf-8').split(/\r?\n/);
-  lines = lines.filter((line) => !line.trim().startsWith('DATABASE_URL='));
-  fs.writeFileSync(standaloneEnvPath, lines.join('\n'));
-  console.log('[standalone-assets] Sanitized .next/standalone/.env (stripped DATABASE_URL for local SQLite isolation)');
+if (fs.existsSync(rootEnvPath)) {
+  if (isDesktopBuild) {
+    let lines = fs.readFileSync(rootEnvPath, 'utf-8').split(/\r?\n/);
+    lines = lines.filter((line) => !line.trim().startsWith('DATABASE_URL='));
+    fs.writeFileSync(standaloneEnvPath, lines.join('\n'));
+    console.log('[standalone-assets] Sanitized .next/standalone/.env (stripped DATABASE_URL for desktop SQLite isolation)');
+  } else {
+    safeCopyFile(rootEnvPath, standaloneEnvPath);
+    console.log('[standalone-assets] Synced .env into standalone for cloud PostgreSQL production');
+  }
 }
 
 // 8. Remove any unwanted backups directory from standalone
