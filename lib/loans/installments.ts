@@ -50,6 +50,9 @@ export interface InstallmentScheduleItem {
   notes?: string | null;
   loanCalculationType?: string;
   advanceInterest?: number;
+  paidLater?: boolean;
+  paidLaterDate?: string | null;
+  paidLaterReceiptNo?: string | null;
 }
 
 export interface CollectedTodayPaymentItem {
@@ -322,16 +325,33 @@ export async function bootstrapExistingLoans() {
 
 /**
  * Format a Prisma LoanInstallment into a unified InstallmentScheduleItem
+ * Point-in-time calculation ensures historical date queries reflect payments up to that date.
  */
 function mapInstallmentToItem(
   inst: any,
-  referenceDateStr: string
+  referenceDateStr: string,
+  targetDayEnd?: Date,
+  pointInTimePaidAmount?: number,
+  laterPaymentInfo?: { receiptNo?: string; dateDisplay?: string }
 ): InstallmentScheduleItem {
   const dueYMD = toISTDateString(inst.dueDate);
   const isPast = dueYMD < referenceDateStr;
-  const isFullyPaid = inst.paidAmount >= inst.installmentAmount;
-  const isPartial = inst.paidAmount > 0 && !isFullyPaid;
-  const pendingAmount = Math.max(0, inst.installmentAmount - inst.paidAmount);
+
+  // An installment is paid later if it was not paid on/before target date, but was paid on a future date
+  const isPaidLater = Boolean(
+    (pointInTimePaidAmount !== undefined && pointInTimePaidAmount < inst.installmentAmount && inst.paidAmount >= inst.installmentAmount) ||
+    (targetDayEnd && inst.actualPaymentDate && inst.actualPaymentDate > targetDayEnd)
+  );
+
+  const effectivePaid = pointInTimePaidAmount !== undefined
+    ? pointInTimePaidAmount
+    : isPaidLater
+    ? 0
+    : inst.paidAmount;
+
+  const isFullyPaid = effectivePaid >= inst.installmentAmount;
+  const isPartial = effectivePaid > 0 && !isFullyPaid;
+  const pendingAmount = Math.max(0, inst.installmentAmount - effectivePaid);
 
   let status: "PENDING" | "PAID" | "PARTIAL" | "OVERDUE" = "PENDING";
   let statusRaw: "PENDING" | "COLLECTED" | "PARTIALLY_PAID" | "OVERDUE" = "PENDING";
@@ -348,6 +368,21 @@ function mapInstallmentToItem(
   } else {
     status = "PENDING";
     statusRaw = "PENDING";
+  }
+
+  // Calculate proportional principal and interest paid as of point in time
+  const principalPortion = inst.principalPortion || 0;
+  const interestPortion = inst.interestPortion || 0;
+  let effectivePrincipalPaid = 0;
+  let effectiveInterestPaid = 0;
+  if (effectivePaid > 0) {
+    if (isFullyPaid) {
+      effectivePrincipalPaid = principalPortion;
+      effectiveInterestPaid = interestPortion;
+    } else {
+      effectiveInterestPaid = Math.min(interestPortion, effectivePaid);
+      effectivePrincipalPaid = effectivePaid - effectiveInterestPaid;
+    }
   }
 
   return {
@@ -370,24 +405,27 @@ function mapInstallmentToItem(
     amount: inst.installmentAmount,
     dueAmount: inst.installmentAmount,
     installmentAmount: inst.installmentAmount,
-    principal: inst.principalPortion,
-    principalPortion: inst.principalPortion,
-    interest: inst.interestPortion,
-    interestPortion: inst.interestPortion,
-    paidAmount: inst.paidAmount,
-    principalPaid: inst.principalPaid || 0,
-    interestPaid: inst.interestPaid || 0,
+    principal: principalPortion,
+    principalPortion: principalPortion,
+    interest: interestPortion,
+    interestPortion: interestPortion,
+    paidAmount: effectivePaid,
+    principalPaid: effectivePrincipalPaid,
+    interestPaid: effectiveInterestPaid,
     remainingAmount: pendingAmount,
     pendingAmount,
     balance: pendingAmount,
     balanceAmount: pendingAmount,
     status,
     statusRaw,
-    actualPaymentDate: inst.actualPaymentDate ? toISTDateString(inst.actualPaymentDate) : null,
-    paymentMethod: inst.paymentMethod || null,
+    actualPaymentDate: isPaidLater ? null : (inst.actualPaymentDate ? toISTDateString(inst.actualPaymentDate) : null),
+    paymentMethod: isPaidLater ? null : (inst.paymentMethod || null),
     notes: inst.notes || null,
     loanCalculationType: inst.loan?.loanCalculationType || "STANDARD",
     advanceInterest: (inst.loan as any)?.advanceInterest || 0,
+    paidLater: isPaidLater,
+    paidLaterDate: isPaidLater ? (laterPaymentInfo?.dateDisplay || (inst.actualPaymentDate ? formatISTDisplay(inst.actualPaymentDate) : null)) : undefined,
+    paidLaterReceiptNo: isPaidLater ? (laterPaymentInfo?.receiptNo || undefined) : undefined,
   };
 }
 
@@ -438,17 +476,17 @@ export async function getCollectionSchedule(
     orderBy: { date: "desc" },
   });
 
-  // 3. Fetch Overdue Installments (due strictly before today and not fully paid)
+  // 3. Fetch Overdue Installments (due strictly before target date and not fully paid as of target date)
   const overdueInstallments = await prisma.loanInstallment.findMany({
     where: {
       loan: { status: { in: ["ACTIVE", "OVERDUE"] } },
       dueDate: {
         lt: range.start,
       },
-      paidAmount: {
-        lt: prisma.loanInstallment.fields.installmentAmount,
-      },
-      status: { not: "COLLECTED" },
+      OR: [
+        { status: { not: "COLLECTED" } },
+        { actualPaymentDate: { gt: range.end } },
+      ],
     },
     include: {
       customer: true,
@@ -470,24 +508,120 @@ export async function getCollectionSchedule(
     },
   });
 
-  // Transform items
+  // Collect distinct relevant loan IDs for point-in-time calculation
+  const relevantLoanIds = Array.from(
+    new Set([
+      ...dueInstallments.map((i) => i.loanId),
+      ...todayPayments.map((p) => p.loanId),
+      ...overdueInstallments.map((i) => i.loanId),
+    ])
+  );
+
+  // Pre-fetch prior payments, future payments, and installments for point-in-time state
+  type InstSummary = { id: string; loanId: string; installmentNumber: number; installmentAmount: number };
+  const priorPayments =
+    relevantLoanIds.length > 0
+      ? await prisma.loanPayment.findMany({
+          where: {
+            loanId: { in: relevantLoanIds },
+            date: { lte: range.end },
+          },
+          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+        })
+      : [];
+
+  const futurePayments =
+    relevantLoanIds.length > 0
+      ? await prisma.loanPayment.findMany({
+          where: {
+            loanId: { in: relevantLoanIds },
+            date: { gt: range.end },
+          },
+          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+        })
+      : [];
+
+  const allInstallmentsForLoans: InstSummary[] =
+    relevantLoanIds.length > 0
+      ? await prisma.loanInstallment.findMany({
+          where: { loanId: { in: relevantLoanIds } },
+          orderBy: { installmentNumber: "asc" },
+          select: { id: true, loanId: true, installmentNumber: true, installmentAmount: true },
+        })
+      : [];
+
+  const allLoanPayments =
+    relevantLoanIds.length > 0
+      ? await prisma.loanPayment.findMany({
+          where: { loanId: { in: relevantLoanIds } },
+          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+        })
+      : [];
+
+  // Point-in-time installment paid calculation (FIFO allocation of payments up to target date)
+  const installmentPaidAsOfDate = new Map<string, number>();
+  const priorPaymentsByLoan = new Map<string, number>();
+  for (const p of priorPayments) {
+    priorPaymentsByLoan.set(p.loanId, (priorPaymentsByLoan.get(p.loanId) || 0) + p.amount);
+  }
+
+  const installmentsByLoan = new Map<string, InstSummary[]>();
+  for (const inst of allInstallmentsForLoans) {
+    if (!installmentsByLoan.has(inst.loanId)) installmentsByLoan.set(inst.loanId, []);
+    installmentsByLoan.get(inst.loanId)!.push(inst);
+  }
+
+  for (const [loanId, instList] of installmentsByLoan.entries()) {
+    let remPaid = priorPaymentsByLoan.get(loanId) || 0;
+    for (const inst of instList) {
+      if (remPaid <= 0) {
+        installmentPaidAsOfDate.set(inst.id, 0);
+      } else {
+        const allocated = Math.min(inst.installmentAmount, remPaid);
+        installmentPaidAsOfDate.set(inst.id, allocated);
+        remPaid -= allocated;
+      }
+    }
+  }
+
+  // Map later payment info (receipt number and date display) for installments paid on future dates
+  const laterReceiptMap = new Map<string, { receiptNo: string; dateDisplay: string }>();
+  for (const inst of [...dueInstallments, ...overdueInstallments]) {
+    if (inst.actualPaymentDate && inst.actualPaymentDate > range.end) {
+      const instTime = inst.actualPaymentDate.getTime();
+      const match =
+        futurePayments.find(
+          (p) => p.loanId === inst.loanId && Math.abs(p.date.getTime() - instTime) < 5000
+        ) ||
+        futurePayments.find(
+          (p) => p.loanId === inst.loanId && (p.notes || "").includes(`#${inst.installmentNumber}`)
+        );
+
+      if (match) {
+        laterReceiptMap.set(inst.id, {
+          receiptNo: match.paymentNo,
+          dateDisplay: formatISTDisplay(match.date),
+        });
+      }
+    }
+  }
+
+  // Transform items with point-in-time precision
   const todayDue: InstallmentScheduleItem[] = dueInstallments.map((inst) =>
-    mapInstallmentToItem(inst, targetDateStr)
+    mapInstallmentToItem(
+      inst,
+      targetDateStr,
+      range.end,
+      installmentPaidAsOfDate.get(inst.id),
+      laterReceiptMap.get(inst.id)
+    )
   );
 
   // TAB 2: Today's Pending = Installments due today where paidAmount < installmentAmount
   const todayPending: InstallmentScheduleItem[] = todayDue.filter((item) => item.pendingAmount > 0);
 
-  // Pre-fetch all payments for loans in todayPayments to calculate exact loan-level previous & remaining outstanding
-  const distinctLoanIds = Array.from(new Set(todayPayments.map((p) => p.loanId)));
-  const allLoanPayments = distinctLoanIds.length > 0
-    ? await prisma.loanPayment.findMany({
-        where: { loanId: { in: distinctLoanIds } },
-        orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-      })
-    : [];
-
-  const paymentsByLoan = new Map<string, typeof allLoanPayments>();
+  type PaymentRecord = (typeof allLoanPayments)[number];
+  const paymentsByLoan = new Map<string, PaymentRecord[]>();
   for (const lp of allLoanPayments) {
     if (!paymentsByLoan.has(lp.loanId)) paymentsByLoan.set(lp.loanId, []);
     paymentsByLoan.get(lp.loanId)!.push(lp);
@@ -562,9 +696,17 @@ export async function getCollectionSchedule(
     };
   });
 
-  const overdue: InstallmentScheduleItem[] = overdueInstallments.map((inst) =>
-    mapInstallmentToItem(inst, targetDateStr)
-  );
+  const overdue: InstallmentScheduleItem[] = overdueInstallments
+    .map((inst) =>
+      mapInstallmentToItem(
+        inst,
+        targetDateStr,
+        range.end,
+        installmentPaidAsOfDate.get(inst.id),
+        laterReceiptMap.get(inst.id)
+      )
+    )
+    .filter((item) => item.pendingAmount > 0);
 
   // Reconciled Financial Totals
   const todayDueAmount = todayDue.reduce((s, i) => s + i.dueAmount, 0);

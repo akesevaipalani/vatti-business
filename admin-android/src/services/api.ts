@@ -773,7 +773,17 @@ export const api = {
     const targetDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getTodayIST();
     const qs = `?date=${encodeURIComponent(targetDate)}`;
 
-    // Resilient collection schedule sourced directly from production Railway endpoints
+    // 1. Prefer authoritative central collection schedule endpoint
+    try {
+      const scheduleRes = await apiRequest<CollectionScheduleResponse>(`/api/collections/schedule${qs}`);
+      if (scheduleRes && scheduleRes.summary && Array.isArray(scheduleRes.todayDue)) {
+        return scheduleRes;
+      }
+    } catch (scheduleErr) {
+      console.warn("[CollectionSchedule] /api/collections/schedule error, using composite fallback:", scheduleErr);
+    }
+
+    // 2. Resilient composite fallback sourced directly from production endpoints
     const [todayRes, pendingRes, colRes] = await Promise.all([
       this.getTodayCollections(targetDate).catch((err) => {
         console.warn("[CollectionSchedule] getTodayCollections error:", err);
@@ -812,10 +822,11 @@ export const api = {
     const todayDue: TodayCollectionItem[] = rawToday.map((item: any) => {
       const instAmount = Number(item.amount ?? item.dueAmount ?? item.installmentAmount ?? 0);
       const paid = Number(item.paidAmount ?? 0);
+      const isPaidLater = Boolean(item.paidLater);
       const pending = item.pendingAmount !== undefined ? Number(item.pendingAmount) : Math.max(0, instAmount - paid);
-      const isPaid = item.status === "PAID" || (paid >= instAmount && instAmount > 0);
-      const isPartial = !isPaid && paid > 0;
-      const status = isPaid ? "PAID" : isPartial ? "PARTIAL" : (item.status || "PENDING");
+      const isPaid = !isPaidLater && (item.status === "PAID" || (paid >= instAmount && instAmount > 0));
+      const isPartial = !isPaid && !isPaidLater && paid > 0;
+      const status = isPaid ? "PAID" : isPaidLater ? "PENDING" : isPartial ? "PARTIAL" : (item.status || "PENDING");
 
       const anyItem = item as any;
       return {
@@ -839,6 +850,9 @@ export const api = {
         interestPortion: Number(anyItem.interestPortion || 0),
         dueDate: anyItem.dueDate || targetDate,
         status,
+        paidLater: isPaidLater,
+        paidLaterDate: anyItem.paidLaterDate || undefined,
+        paidLaterReceiptNo: anyItem.paidLaterReceiptNo || undefined,
       };
     });
 

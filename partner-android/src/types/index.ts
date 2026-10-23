@@ -151,6 +151,9 @@ export interface TodayCollectionItem {
   statusRaw?: string;
   actualPaymentDate?: string | null;
   paymentMethod?: string | null;
+  paidLater?: boolean;
+  paidLaterDate?: string | null;
+  paidLaterReceiptNo?: string | null;
 }
 
 export interface CollectedTodayPaymentItem {

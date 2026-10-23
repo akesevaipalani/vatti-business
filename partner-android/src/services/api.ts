@@ -703,29 +703,44 @@ export const api = {
     const targetDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getTodayIST();
     const qs = `?date=${encodeURIComponent(targetDate)}`;
 
+    // Try unified /api/collections/schedule endpoint first
+    let scheduleDirect: CollectionScheduleResponse | null = null;
+    try {
+      const res = await apiRequest<CollectionScheduleResponse>(`/api/collections/schedule${qs}`);
+      if (res && res.summary) {
+        scheduleDirect = res;
+      }
+    } catch {
+      // Fallback to composing individual endpoints
+    }
+
     // Resilient collection schedule sourced directly from production Railway endpoints
     const [todayRes, pendingRes, colRes] = await Promise.all([
-      this.getTodayCollections(targetDate).catch((err) => {
-        console.warn("[CollectionSchedule] getTodayCollections error:", err);
-        return {
-          date: targetDate,
-          totalCustomers: 0,
-          totalAmountToCollect: 0,
-          totalCollected: 0,
-          totalRemaining: 0,
-          items: [] as TodayCollectionItem[],
-        };
-      }),
-      this.getPendingCollections(targetDate).catch((err) => {
-        console.warn("[CollectionSchedule] getPendingCollections error:", err);
-        return {
-          date: targetDate,
-          totalPendingCustomers: 0,
-          totalPendingInstallments: 0,
-          totalPendingAmount: 0,
-          items: [] as TodayCollectionItem[],
-        };
-      }),
+      scheduleDirect
+        ? Promise.resolve({ items: scheduleDirect.todayDue || [] } as any)
+        : this.getTodayCollections(targetDate).catch((err) => {
+            console.warn("[CollectionSchedule] getTodayCollections error:", err);
+            return {
+              date: targetDate,
+              totalCustomers: 0,
+              totalAmountToCollect: 0,
+              totalCollected: 0,
+              totalRemaining: 0,
+              items: [] as TodayCollectionItem[],
+            };
+          }),
+      scheduleDirect
+        ? Promise.resolve({ items: scheduleDirect.todayPending || [] } as any)
+        : this.getPendingCollections(targetDate).catch((err) => {
+            console.warn("[CollectionSchedule] getPendingCollections error:", err);
+            return {
+              date: targetDate,
+              totalPendingCustomers: 0,
+              totalPendingInstallments: 0,
+              totalPendingAmount: 0,
+              items: [] as TodayCollectionItem[],
+            };
+          }),
       this.getCollectionHistory().catch((err) => {
         console.warn("[CollectionSchedule] getCollectionHistory error:", err);
         return {
@@ -742,10 +757,11 @@ export const api = {
     const todayDue: TodayCollectionItem[] = rawToday.map((item: any) => {
       const instAmount = Number(item.amount ?? item.dueAmount ?? item.installmentAmount ?? 0);
       const paid = Number(item.paidAmount ?? 0);
+      const isPaidLater = Boolean(item.paidLater);
       const pending = item.pendingAmount !== undefined ? Number(item.pendingAmount) : Math.max(0, instAmount - paid);
-      const isPaid = item.status === "PAID" || (paid >= instAmount && instAmount > 0);
-      const isPartial = !isPaid && paid > 0;
-      const status = isPaid ? "PAID" : isPartial ? "PARTIAL" : (item.status || "PENDING");
+      const isPaid = !isPaidLater && (item.status === "PAID" || (paid >= instAmount && instAmount > 0));
+      const isPartial = !isPaid && !isPaidLater && paid > 0;
+      const status = isPaid ? "PAID" : isPaidLater ? "PENDING" : isPartial ? "PARTIAL" : (item.status || "PENDING");
 
       const anyItem = item as any;
       return {
@@ -777,6 +793,9 @@ export const api = {
         interestPortion: Number(anyItem.interestPortion || 0),
         dueDate: anyItem.dueDate || targetDate,
         status,
+        paidLater: isPaidLater,
+        paidLaterDate: anyItem.paidLaterDate || undefined,
+        paidLaterReceiptNo: anyItem.paidLaterReceiptNo || undefined,
       };
     });
 

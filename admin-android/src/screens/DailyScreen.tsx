@@ -43,6 +43,7 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
   // Payment Recording Modal
   const [selectedItem, setSelectedItem] = useState<TodayCollectionItem | null>(null);
   const [collectAmount, setCollectAmount] = useState("");
+  const [collectionDate, setCollectionDate] = useState(() => getTodayIST());
   const [paymentMethod, setPaymentMethod] = useState("CASH");
   const [collectNotes, setCollectNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -118,6 +119,7 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
     const pendingVal = item.pendingAmount !== undefined ? item.pendingAmount : item.amount;
     setCollectAmount(String(pendingVal));
     setPaymentMethod("CASH");
+    setCollectionDate(selectedDate || getTodayIST());
     setCollectNotes("");
     setSubmitError(null);
   };
@@ -142,7 +144,7 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
       const result = await api.recordCollection({
         installmentId: instId,
         amount: amt,
-        collectionDate: selectedDate,
+        collectionDate: collectionDate || selectedDate,
         paymentMethod,
         notes: collectNotes.trim() || undefined,
       });
@@ -490,14 +492,20 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
 
                   <span
                     className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${
-                      isPaid
+                      item.paidLater
+                        ? "bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"
+                        : isPaid
                         ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400"
                         : isPartial
                         ? "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400"
                         : "bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400"
                     }`}
                   >
-                    {isPaid
+                    {item.paidLater
+                      ? (language === "ta"
+                          ? `பிற்பாடு வசூலானது (${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : ""})`
+                          : `Paid on ${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : "later date"}`)
+                      : isPaid
                       ? "✓ வசூலானது"
                       : isPartial
                       ? `பகுதி வசூல் (₹${(item.paidAmount || 0).toLocaleString("en-IN")})`
@@ -528,7 +536,23 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
                     </div>
                   </div>
 
-                  {!isPaid ? (
+                  {item.paidLater ? (
+                    <div className="text-right">
+                      <div className="text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center justify-end gap-1">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          {language === "ta"
+                            ? `வசூலானது: ${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : ""}`
+                            : `Paid on ${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : "Later"}`}
+                        </span>
+                      </div>
+                      {item.paidLaterReceiptNo && (
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          #{item.paidLaterReceiptNo}
+                        </span>
+                      )}
+                    </div>
+                  ) : !isPaid ? (
                     <button
                       type="button"
                       onClick={() => handleOpenCollectModal(item)}
@@ -591,6 +615,29 @@ export const DailyScreen: React.FC<DailyScreenProps> = ({ onBack }) => {
                   onChange={(e) => setCollectAmount(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-lg font-extrabold text-slate-900 dark:text-white"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {language === "ta" ? "வசூல் தேதி (Collection Date) *" : "Collection Date *"}
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={collectionDate}
+                  onChange={(e) => setCollectionDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+                />
+                {selectedItem.dueDate && collectionDate !== selectedItem.dueDate && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1 font-medium">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {language === "ta"
+                        ? `தவணை தேதி: ${selectedItem.dueDate} | வசூல் சேமிக்கப்படும் தேதி: ${collectionDate}`
+                        : `Installment Due: ${selectedItem.dueDate} | Payment will be stored on: ${collectionDate}`}
+                    </span>
+                  </p>
+                )}
               </div>
 
               <div>

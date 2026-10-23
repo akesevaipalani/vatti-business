@@ -895,18 +895,20 @@ export default function CollectionManagementPage() {
                               {formatCurrency(item.pendingAmount)}
                             </td>
                             <td className="py-3.5 px-4 text-center">
-                              {item.status === "PAID" && (
+                              {(item as any).paidLater ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300" title={`Paid on ${(item as any).paidLaterDate ? formatISTDisplay((item as any).paidLaterDate) : "later date"}`}>
+                                  <span>PAID LATER</span>
+                                </span>
+                              ) : item.status === "PAID" ? (
                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
                                   <CheckCircle2 className="w-3 h-3" />
                                   <span>PAID</span>
                                 </span>
-                              )}
-                              {item.status === "PARTIAL" && (
+                              ) : item.status === "PARTIAL" ? (
                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                                   <span>PARTIAL</span>
                                 </span>
-                              )}
-                              {item.status === "PENDING" && (
+                              ) : (
                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                                   <Clock className="w-3 h-3" />
                                   <span>PENDING</span>
@@ -914,18 +916,29 @@ export default function CollectionManagementPage() {
                               )}
                             </td>
                             <td className="print:hidden py-3.5 px-4 text-center">
-                              <button
-                                onClick={() => openCollectModal(item)}
-                                disabled={isFullyPaid}
-                                className={`py-1.5 px-3 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1 mx-auto ${
-                                  isFullyPaid
-                                    ? "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed"
-                                    : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20"
-                                }`}
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>{isFullyPaid ? "Paid" : "Collect"}</span>
-                              </button>
+                              {(item as any).paidLater ? (
+                                <span className="text-[10px] text-purple-700 dark:text-purple-300 font-mono font-bold block">
+                                  Paid Later
+                                  {(item as any).paidLaterReceiptNo && (
+                                    <span className="block text-[9px] text-slate-400 font-normal">
+                                      #{(item as any).paidLaterReceiptNo}
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => openCollectModal(item)}
+                                  disabled={isFullyPaid}
+                                  className={`py-1.5 px-3 rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1 mx-auto ${
+                                    isFullyPaid
+                                      ? "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-600 cursor-not-allowed"
+                                      : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20"
+                                  }`}
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{isFullyPaid ? "Paid" : "Collect"}</span>
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -1034,7 +1047,11 @@ export default function CollectionManagementPage() {
                             {formatCurrency(item.pendingAmount)}
                           </td>
                           <td className="py-3.5 px-4 text-center">
-                            {item.status === "PARTIAL" ? (
+                            {(item as any).paidLater ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300" title={`Paid on ${(item as any).paidLaterDate ? formatISTDisplay((item as any).paidLaterDate) : "later date"}`}>
+                                <span>PAID LATER</span>
+                              </span>
+                            ) : item.status === "PARTIAL" ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
                                 <span>PARTIAL</span>
                               </span>
@@ -1046,13 +1063,24 @@ export default function CollectionManagementPage() {
                             )}
                           </td>
                           <td className="print:hidden py-3.5 px-4 text-center">
-                            <button
-                              onClick={() => openCollectModal(item)}
-                              className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition flex items-center gap-1 mx-auto"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Collect</span>
-                            </button>
+                            {(item as any).paidLater ? (
+                              <span className="text-[10px] text-purple-700 dark:text-purple-300 font-mono font-bold block">
+                                Paid Later
+                                {(item as any).paidLaterReceiptNo && (
+                                  <span className="block text-[9px] text-slate-400 font-normal">
+                                    #{(item as any).paidLaterReceiptNo}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => openCollectModal(item)}
+                                className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition flex items-center gap-1 mx-auto"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Collect</span>
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1276,19 +1304,36 @@ export default function CollectionManagementPage() {
                             {formatCurrency(item.pendingAmount)}
                           </td>
                           <td className="py-3.5 px-4 text-center">
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
-                              <AlertTriangle className="w-3 h-3" />
-                              <span>OVERDUE</span>
-                            </span>
+                            {(item as any).paidLater ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300" title={`Paid on ${(item as any).paidLaterDate ? formatISTDisplay((item as any).paidLaterDate) : "later date"}`}>
+                                <span>PAID LATER</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                                <AlertTriangle className="w-3 h-3" />
+                                <span>OVERDUE</span>
+                              </span>
+                            )}
                           </td>
                           <td className="print:hidden py-3.5 px-4 text-center">
-                            <button
-                              onClick={() => openCollectModal(item)}
-                              className="py-1.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition flex items-center gap-1 mx-auto"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Collect</span>
-                            </button>
+                            {(item as any).paidLater ? (
+                              <span className="text-[10px] text-purple-700 dark:text-purple-300 font-mono font-bold block">
+                                Paid Later
+                                {(item as any).paidLaterReceiptNo && (
+                                  <span className="block text-[9px] text-slate-400 font-normal">
+                                    #{(item as any).paidLaterReceiptNo}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => openCollectModal(item)}
+                                className="py-1.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-600/20 transition flex items-center gap-1 mx-auto"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Collect</span>
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

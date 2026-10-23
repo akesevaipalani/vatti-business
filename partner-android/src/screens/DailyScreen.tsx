@@ -7,6 +7,7 @@ import {
   Phone,
   RefreshCw,
   AlertTriangle,
+  AlertCircle,
   X,
   Receipt,
   CheckCircle,
@@ -487,14 +488,20 @@ export const DailyScreen: React.FC = () => {
 
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      isPaid
+                      item.paidLater
+                        ? "bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"
+                        : isPaid
                         ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400"
                         : isPartial
                         ? "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400"
                         : "bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400"
                     }`}
                   >
-                    {isPaid
+                    {item.paidLater
+                      ? (language === "ta"
+                          ? `பிற்பாடு வசூலானது (${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : ""})`
+                          : `Paid on ${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : "later date"}`)
+                      : isPaid
                       ? "✓ வசூலானது"
                       : isPartial
                       ? `பகுதி வசூல் (₹${(item.paidAmount || 0).toLocaleString("en-IN")})`
@@ -525,7 +532,23 @@ export const DailyScreen: React.FC = () => {
                     </div>
                   </div>
 
-                  {!isPaid ? (
+                  {item.paidLater ? (
+                    <div className="text-right">
+                      <div className="text-xs font-semibold text-purple-600 dark:text-purple-400 flex items-center justify-end gap-1">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          {language === "ta"
+                            ? `வசூலானது: ${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : ""}`
+                            : `Paid on ${item.paidLaterDate ? new Date(item.paidLaterDate).toLocaleDateString("en-IN") : "Later"}`}
+                        </span>
+                      </div>
+                      {item.paidLaterReceiptNo && (
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          #{item.paidLaterReceiptNo}
+                        </span>
+                      )}
+                    </div>
+                  ) : !isPaid ? (
                     <button
                       type="button"
                       onClick={() => handleOpenCollectModal(item)}
@@ -581,6 +604,29 @@ export const DailyScreen: React.FC = () => {
                   onChange={(e) => setCollectionAmount(parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-lg font-black text-slate-900 dark:text-white outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1">
+                  {language === "ta" ? "வசூல் தேதி (Collection Date) *" : "Collection Date *"}
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={actualDate}
+                  onChange={(e) => setActualDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white outline-none"
+                />
+                {collectingItem.dueDate && actualDate !== collectingItem.dueDate && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1 font-medium">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {language === "ta"
+                        ? `தவணை தேதி: ${collectingItem.dueDate} | வசூல் சேமிக்கப்படும் தேதி: ${actualDate}`
+                        : `Installment Due: ${collectingItem.dueDate} | Payment will be stored on: ${actualDate}`}
+                    </span>
+                  </p>
+                )}
               </div>
 
               <div>
